@@ -25,6 +25,23 @@ tokenize_eof_test :: proc(t: ^testing.T) {
 }
 
 @(test)
+tokenize_operators :: proc(t: ^testing.T) {
+	source := "1 + 2 +- */"
+	tokens := tokenize_entire_source(source, context.temp_allocator)
+	
+	testing.expect(t, len(tokens) == 8)
+	testing.expect(t, tokens[0].type == .Integer_Literal)
+	testing.expect(t, tokens[1].type == .Plus)
+	testing.expect(t, tokens[2].type == .Integer_Literal)
+	testing.expect(t, tokens[3].type == .Plus)
+	testing.expect(t, tokens[4].type == .Minus)
+	testing.expect(t, tokens[5].type == .Star)
+	testing.expect(t, tokens[6].type == .Slash)
+}
+
+
+
+@(test)
 tokenize_invalid_test :: proc(t: ^testing.T) {
 	source := "@@123@"
 	

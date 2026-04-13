@@ -7,6 +7,10 @@ import "core:unicode/utf8"
 Token_Type :: enum {
 	Invalid = 0,
 	Integer_Literal,
+	Plus,
+	Minus,
+	Star,
+	Slash,
 	EOF,
 }
 
@@ -47,16 +51,30 @@ tk_scan :: proc(tk: ^Tokenizer) {
 	switch tk_current_rune(tk) {
 	case utf8.RUNE_ERROR:
 		tk.token = {
-			type = .EOF,
-			value = "<EOF>"
+			type  = .EOF,
+			value = "<EOF>",
 		}
 	case '0' ..= '9':
 		emit_number(tk)
+	case '+':
+		emit_basic(tk, .Plus, 1)
+	case '-':
+		emit_basic(tk, .Minus, 1)
+	case '*':
+		emit_basic(tk, .Star, 1)
+	case '/':
+		emit_basic(tk, .Slash, 1)
 	case:
 		emit_invalid_token(tk)
 	}
-	
-	
+}
+
+emit_basic :: proc(tk: ^Tokenizer, type: Token_Type, byte_length: int) {
+	tk.token = {
+		type  = type,
+		value = tk.source[tk.offset:tk.offset + byte_length],
+	}
+	tk.offset += byte_length
 }
 
 tk_is_done :: proc(tk: ^Tokenizer) -> bool {
@@ -67,18 +85,18 @@ emit_number :: proc(tk: ^Tokenizer) {
 	start := tk.offset
 	outer: for {
 		switch tk_current_rune(tk) {
-		case '0'..='9':
+		case '0' ..= '9':
 			tk_advance_rune(tk)
 		case:
 			break outer
 		}
 	}
-	
+
 	str := tk.source[start:tk.offset]
-	
+
 	tk.token = {
-		type = .Integer_Literal,
-		value = str
+		type  = .Integer_Literal,
+		value = str,
 	}
 }
 
@@ -86,10 +104,10 @@ emit_invalid_token :: proc(tk: ^Tokenizer) {
 	start := tk.offset
 	tk_advance_rune(tk)
 	str := tk.source[start:tk.offset]
-	
+
 	tk.token = {
-		type = .Invalid,
-		value = str
+		type  = .Invalid,
+		value = str,
 	}
 }
 

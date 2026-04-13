@@ -2,7 +2,7 @@
 
 I don't know much about where this'll go, but here're the plans
 - [x] Basic number tokenizing
-- [ ] Operator tokenizing
+- [x] Operator tokenizing
 - [ ] Basic expression parsing
 - [ ] Tree-walk interpreting
 - [ ] Variables
