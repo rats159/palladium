@@ -11,6 +11,8 @@ Token_Type :: enum {
 	Minus,
 	Star,
 	Slash,
+	Open_Paren,
+	Close_Paren,
 	EOF,
 }
 
@@ -64,6 +66,10 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Star, 1)
 	case '/':
 		emit_basic(tk, .Slash, 1)
+	case '(':
+		emit_basic(tk, .Open_Paren, 1)
+	case ')':
+		emit_basic(tk, .Close_Paren, 1)
 	case:
 		emit_invalid_token(tk)
 	}
