@@ -1,8 +1,9 @@
 # Palladium Programming Language
 
 I don't know much about where this'll go, but here're the plans
-- [ ] Basic number tokenizing
-- [ ] Basix expression parsing
+- [x] Basic number tokenizing
+- [ ] Operator tokenizing
+- [ ] Basic expression parsing
 - [ ] Tree-walk interpreting
 - [ ] Variables
 - [ ] Strings
