@@ -4,7 +4,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Basic number tokenizing
 - [x] Operator tokenizing
 - [x] Basic expression parsing
-- [ ] Tree-walk interpreting
+- [x] Tree-walk interpreting
 - [ ] Variables
 - [ ] Strings
 - [ ] Foreign Functions

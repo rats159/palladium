@@ -87,8 +87,6 @@ test_parse_expression_precedence :: proc(t: ^testing.T) {
 	left_right_left := expect_and_unwrap(t, left_right.left, ^Integer_Node)
 	left_right_right := expect_and_unwrap(t, left_right.right, ^Integer_Node)
 
-	fmt.println(bin_op)
-
 	testing.expect(t, bin_op.op == .Plus)
 	testing.expect(t, left.op == .Plus)
 	testing.expect(t, left_right.op == .Star)
@@ -117,6 +115,24 @@ test_parse_parentheses :: proc(t: ^testing.T) {
 	testing.expect_value(t, right.op, Token_Type.Plus)
 }
 
+@(test)
+test_basic_evaluation :: proc(t: ^testing.T) {
+	val := execute_from_source(t, "1 + 1")
+	testing.expect_value(t, val, 2)
+}
+
+@(test)
+test_order_of_operations :: proc(t: ^testing.T) {
+	val := execute_from_source(t, "1 + 2 * (3 / 4 - 5) * 6")
+	testing.expect_value(t, val, 1 + 2 * (3 / 4 - 5) * 6)
+}
+
+@(test)
+test_associativity :: proc(t: ^testing.T) {
+	val := execute_from_source(t, "1 - 2 - 3 - 4")
+	testing.expect_value(t, val, 1 - 2 - 3 - 4)
+}
+
 @(private = "file")
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, ok := v.(T)
@@ -125,3 +141,9 @@ expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_locat
 	return variant
 }
 
+@(private = "file")
+execute_from_source :: proc(t: ^testing.T, source: string) -> i64 {
+	ast, err := parse_file(source, context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	return evaluate_expression(ast)
+} 
