@@ -2,6 +2,7 @@ package palladium
 
 import "base:runtime"
 import "core:fmt"
+import "core:reflect"
 import "core:strconv"
 
 Parser :: struct {
@@ -9,9 +10,14 @@ Parser :: struct {
 	allocator: runtime.Allocator,
 }
 
+Variable_Write_Node :: struct {
+	name:  string,
+	value: Node,
+}
+
 Variable_Declaration_Node :: struct {
-	name: string,
-	value: Node
+	name:  string,
+	value: Node,
 }
 
 Integer_Node :: struct {
@@ -19,7 +25,7 @@ Integer_Node :: struct {
 }
 
 Variable_Read_Node :: struct {
-	name: string
+	name: string,
 }
 
 Binary_Op_Node :: struct {
@@ -29,12 +35,13 @@ Binary_Op_Node :: struct {
 }
 
 Block_Node :: struct {
-	statements: []Node
+	statements: []Node,
 }
 
 Parser_Error_Type :: enum {
 	Invalid_Value,
 	Failed_Expectation,
+	Bad_Assignment_Target,
 }
 
 Parser_Error :: struct {
@@ -47,7 +54,8 @@ Node :: union {
 	^Integer_Node,
 	^Block_Node,
 	^Variable_Declaration_Node,
-	^Variable_Read_Node
+	^Variable_Read_Node,
+	^Variable_Write_Node,
 }
 
 parse_file :: proc(
@@ -63,20 +71,26 @@ parse_file :: proc(
 	}
 
 	tk_scan(&p.tokenizer)
-	
+
 	return parse_statement_list(&p, .EOF)
 }
 
-parse_statement_list :: proc(p: ^Parser, until: Token_Type) -> (_node: Node, _err: Maybe(Parser_Error)) {
+parse_statement_list :: proc(
+	p: ^Parser,
+	until: Token_Type,
+) -> (
+	_node: Node,
+	_err: Maybe(Parser_Error),
+) {
 	statements := make([dynamic]Node, p.allocator)
 	for !parser_match(p, until) {
 		statement := parse_statement(p) or_return
 		append(&statements, statement)
 	}
-	
+
 	node := make_node(p, Block_Node)
 	node.statements = statements[:]
-	
+
 	return node, nil
 }
 
@@ -85,7 +99,7 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 	case .Var:
 		return parse_variable_declaration(p)
 	}
-	
+
 	return parse_expression_statement(p)
 }
 
@@ -95,20 +109,35 @@ parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 	_ = parser_expect(p, .Equals) or_return
 	value := parse_expression(p) or_return
 	_ = parser_expect(p, .Semicolon) or_return
-	
+
 	node := make_node(p, Variable_Declaration_Node)
 	node.name = name.value
 	node.value = value
-	
+
 	return node, nil
 }
 
 parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 	expr := parse_expression(p) or_return
+
+	if parser_match(p, .Equals) {
+		value := parse_expression(p) or_return
+
+		#partial switch type in expr {
+		case ^Variable_Read_Node:
+			node := make_node(p, Variable_Write_Node)
+			node.name = type.name
+			node.value = value
+			expr = node
+		case:
+			return {}, Parser_Error{type = .Bad_Assignment_Target, message = fmt.tprintf("Cannot assign to '%s' expressions", reflect.union_variant_typeid(expr))}
+		}
+	}
+
 	_ = parser_expect(p, .Semicolon) or_return
-	
+
 	return expr, nil
-} 
+}
 
 make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 	return new(T, p.allocator)
@@ -116,6 +145,16 @@ make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 
 // Alias for the lowest-precedence expression
 parse_expression :: parse_add
+
+parse_assignment :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	assignee := parse_expression(p) or_return
+
+	if parser_match(p, .Equals) {
+
+	}
+
+	return assignee, nil
+}
 
 parse_add :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 	left := parse_mul(p) or_return
@@ -177,12 +216,12 @@ parse_value :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 parser_expect :: proc(p: ^Parser, type: Token_Type) -> (tok: Token, err: Maybe(Parser_Error)) {
 	tk := parser_advance(p)
 	if tk.type != type {
-		return tk, Parser_Error{
+		return tk, Parser_Error {
 			type = .Failed_Expectation,
-			message = fmt.tprintf("Expected %s but recieved %s", type, tk.type)
+			message = fmt.tprintf("Expected %s but recieved %s", type, tk.type),
 		}
 	}
-	
+
 	return tk, nil
 }
 

@@ -218,6 +218,34 @@ test_multi_statement :: proc(t: ^testing.T) {
 	third := expect_and_unwrap(t, body.statements[2], ^Variable_Declaration_Node)
 }
 
+@(test)
+test_assignment_parse :: proc(t: ^testing.T) {
+	ast, err := parse_file("x = 10;", context.temp_allocator)
+	
+	testing.expect_value(t, err, nil)
+	
+	block := expect_and_unwrap(t, ast, ^Block_Node)
+	assignment := expect_and_unwrap(t, block.statements[0], ^Variable_Write_Node)
+	
+	testing.expect_value(t, assignment.name, "x")
+}
+
+@(test)
+test_assignment_run :: proc(t: ^testing.T) {
+	ast, err := parse_file("var x = 10; var y = 20; y = x; x = 30; var z = y + x; x = 15;", context.temp_allocator)
+	
+	testing.expect_value(t, err, nil)
+	
+	rt := Runtime{}
+	defer cleanup_runtime(&rt)
+	
+	execute_statement(&rt, ast)
+	
+	testing.expect_value(t, read_variable(&rt, "x"), 15)
+	testing.expect_value(t, read_variable(&rt, "y"), 10)
+	testing.expect_value(t, read_variable(&rt, "z"), 40)
+}
+
 @(private = "file")
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, ok := v.(T)

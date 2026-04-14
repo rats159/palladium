@@ -24,10 +24,15 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) {
 		for stmt in type.statements {
 			execute_statement(rt, stmt)
 		}
+	case ^Variable_Write_Node:
+		write_variable(rt, type)
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
+}
 
+write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) {
+	rt.variables[node.name] = evaluate_expression(rt, node.value)
 }
 
 evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> i64 {
