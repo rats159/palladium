@@ -5,7 +5,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Operator tokenizing
 - [x] Basic expression parsing
 - [x] Tree-walk interpreting
-- [ ] Variables
+- [x] Variables
 - [ ] Strings
 - [ ] Foreign Functions
 - [ ] If/else
