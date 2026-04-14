@@ -146,30 +146,62 @@ test_identifier_tokenizing :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_read_variable :: proc(t: ^testing.T) {
+	ast, err := parse_file("var x = 10; var y = x + 10; var z = y * y;", context.temp_allocator)
+
+	testing.expect_value(t, err, nil)
+
+	rt := Runtime{}
+	defer cleanup_runtime(&rt)
+	execute_statement(&rt, ast)
+
+	val := read_variable(&rt, "z")
+	testing.expect_value(t, val, 400)
+}
+
+@(test)
+test_variable_declaration :: proc(t: ^testing.T) {
+	p := make_parser("var x = 10;")
+	ast, err := parse_statement(&p)
+
+	testing.expect_value(t, err, nil)
+
+	rt := Runtime{}
+	defer cleanup_runtime(&rt)
+
+	execute_statement(&rt, ast)
+
+	val := read_variable(&rt, "x")
+	testing.expect_value(t, val, 10)
+}
+
+@(test)
 test_variable_read_parsing :: proc(t: ^testing.T) {
 	p := make_parser("x + 12")
 	expr, err := parse_expression(&p)
-	
+
 	testing.expect_value(t, err, nil)
-	
+
 	add := expect_and_unwrap(t, expr, ^Binary_Op_Node)
-	
+
 	left := expect_and_unwrap(t, add.left, ^Variable_Read_Node)
 	right := expect_and_unwrap(t, add.right, ^Integer_Node)
 }
 
 @(test)
-test_variable_declaration :: proc(t: ^testing.T) {
+test_variable_declaration_parse :: proc(t: ^testing.T) {
 	p := make_parser("var xyz1 = 10 + 20;")
 	ast, err := parse_statement(&p)
 	testing.expect_value(t, err, nil)
-	
+
 	var := expect_and_unwrap(t, ast, ^Variable_Declaration_Node)
 	testing.expect_value(t, var.name, "xyz1")
-	
+
 	value := expect_and_unwrap(t, var.value, ^Binary_Op_Node)
+
+	rt := Runtime{}
 	
-	actual_val := evaluate_binary_expression(value)
+	actual_val := evaluate_binary_expression(&rt, value)
 	testing.expect_value(t, actual_val, 30)
 }
 
@@ -180,7 +212,7 @@ test_multi_statement :: proc(t: ^testing.T) {
 
 	body := expect_and_unwrap(t, ast, ^Block_Node)
 	testing.expect_value(t, len(body.statements), 3)
-	
+
 	first := expect_and_unwrap(t, body.statements[0], ^Binary_Op_Node)
 	second := expect_and_unwrap(t, body.statements[1], ^Binary_Op_Node)
 	third := expect_and_unwrap(t, body.statements[2], ^Variable_Declaration_Node)
@@ -199,7 +231,8 @@ execute_single_expression :: proc(t: ^testing.T, source: string, loc := #caller_
 	p := make_parser(source)
 	ast, err := parse_expression(&p)
 	testing.expect_value(t, err, nil, loc = loc)
-	return evaluate_expression(ast)
+	rt := Runtime{}
+	return evaluate_expression(&rt, ast)
 }
 
 @(private = "file")
