@@ -13,7 +13,13 @@ Token_Type :: enum {
 	Slash,
 	Open_Paren,
 	Close_Paren,
+	Var,
+	Identifier,
 	EOF,
+}
+
+keywords := #partial [Token_Type]string {
+	.Var = "var"
 }
 
 Token :: struct {
@@ -56,6 +62,8 @@ tk_scan :: proc(tk: ^Tokenizer) {
 			type  = .EOF,
 			value = "<EOF>",
 		}
+	case 'A' ..= 'Z', 'a' ..= 'z':
+		emit_named(tk)
 	case '0' ..= '9':
 		emit_number(tk)
 	case '+':
@@ -72,6 +80,36 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Close_Paren, 1)
 	case:
 		emit_invalid_token(tk)
+	}
+}
+
+emit_named :: proc(tk: ^Tokenizer) {
+	start := tk.offset
+
+	outer: for {
+		switch tk_current_rune(tk) {
+		case 'A' ..= 'Z', 'a' ..= 'z', '0' ..= '9', '_':
+			tk_advance_rune(tk)
+		case:
+			break outer
+		}
+	}
+	
+	name := tk.source[start:tk.offset]
+	
+	for kwd, type in keywords {
+		if kwd == name {
+			tk.token = {
+				type = type,
+				value = name
+			}
+			return 
+		}
+	} 
+	
+	tk.token = {
+		type = .Identifier,
+		value = name
 	}
 }
 

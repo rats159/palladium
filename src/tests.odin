@@ -133,6 +133,18 @@ test_associativity :: proc(t: ^testing.T) {
 	testing.expect_value(t, val, 1 - 2 - 3 - 4)
 }
 
+@(test)
+identifier_tokenizing :: proc(t: ^testing.T) {
+	tokens := tokenize_entire_source("var xyz 123 foo_bar variable", context.temp_allocator)
+	
+	testing.expect_value(t, len(tokens), 6)
+	testing.expect_value(t, tokens[0].type, Token_Type.Var)
+	testing.expect_value(t, tokens[1].type, Token_Type.Identifier)
+	testing.expect_value(t, tokens[2].type, Token_Type.Integer_Literal)
+	testing.expect_value(t, tokens[3].type, Token_Type.Identifier)
+	testing.expect_value(t, tokens[4].type, Token_Type.Identifier)
+}
+
 @(private = "file")
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, ok := v.(T)
