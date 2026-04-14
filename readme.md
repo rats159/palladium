@@ -7,12 +7,12 @@ I don't know much about where this'll go, but here're the plans
 - [x] Tree-walk interpreting
 - [x] Variables
 - [ ] Strings
-- [ ] Foreign Functions
 - [ ] If/else
 - [ ] While loops
 - [ ] Standard Functions
 - [ ] Arrays
 - [ ] For loops
+- [ ] Foreign Functions
 should be enough to be somewhat usable. 
 
 ---
