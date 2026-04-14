@@ -4,6 +4,8 @@ import "base:runtime"
 import "core:fmt"
 import "core:reflect"
 import "core:strconv"
+import "core:strings"
+import "core:unicode/utf8"
 
 Parser :: struct {
 	tokenizer: Tokenizer,
@@ -18,6 +20,10 @@ Variable_Write_Node :: struct {
 Variable_Declaration_Node :: struct {
 	name:  string,
 	value: Node,
+}
+
+String_Node :: struct {
+	value: string,
 }
 
 Integer_Node :: struct {
@@ -40,6 +46,7 @@ Block_Node :: struct {
 
 Parser_Error_Type :: enum {
 	Invalid_Value,
+	Invalid_Escape,
 	Failed_Expectation,
 	Bad_Assignment_Target,
 }
@@ -52,6 +59,7 @@ Parser_Error :: struct {
 Node :: union {
 	^Binary_Op_Node,
 	^Integer_Node,
+	^String_Node,
 	^Block_Node,
 	^Variable_Declaration_Node,
 	^Variable_Read_Node,
@@ -186,6 +194,47 @@ parse_mul :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 	return left, nil
 }
 
+// leaks on error. use an arena or be okay with leaks
+parse_string :: proc(p: ^Parser, value: string) -> (string, Maybe(Parser_Error)) {
+	buf := strings.builder_make(0, len(value), p.allocator)
+
+	for i := 0; i < len(value);  /**/{
+		char := utf8.rune_at(value, i)
+		if char == '\\' {
+			i += 1
+			escape_char := utf8.rune_at(value, i)
+			switch escape_char {
+			case 'n':
+				strings.write_byte(&buf, '\n')
+				i += 1
+			case 't':
+				strings.write_byte(&buf, '\t')
+				i += 1
+			case 'r':
+				strings.write_byte(&buf, '\r')
+				i += 1
+			case '"':
+				strings.write_byte(&buf, '"')
+				i += 1
+			case '\\':
+				strings.write_byte(&buf, '\\')
+				i += 1
+			
+			case:
+				return "", Parser_Error {
+					type = .Invalid_Escape,
+					message = fmt.tprintf("Invalid escape sequence '\\%c'", escape_char)
+				}
+			}
+		} else {
+			size, _ := strings.write_rune(&buf, char)
+			i += size
+		}
+	}
+
+	return strings.to_string(buf), nil
+}
+
 parse_integer :: proc(value: string) -> i64 {
 	num, ok := strconv.parse_i64(value)
 	assert(ok, "Invalid integer literal not caught by parser")
@@ -199,6 +248,11 @@ parse_value :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		num := parse_integer(tok.value)
 		node := make_node(p, Integer_Node)
 		node.value = num
+		return node, nil
+	case .String_Literal:
+		str := parse_string(p, tok.value) or_return
+		node := make_node(p, String_Node)
+		node.value = str
 		return node, nil
 	case .Identifier:
 		node := make_node(p, Variable_Read_Node)

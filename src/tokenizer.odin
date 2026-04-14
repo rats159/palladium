@@ -7,6 +7,7 @@ import "core:unicode/utf8"
 Token_Type :: enum {
 	Invalid = 0,
 	Integer_Literal,
+	String_Literal,
 	Equals,
 	Plus,
 	Minus,
@@ -66,6 +67,8 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		}
 	case 'A' ..= 'Z', 'a' ..= 'z':
 		emit_named(tk)
+	case '"':
+		emit_string(tk)
 	case '0' ..= '9':
 		emit_number(tk)
 	case '+':
@@ -86,6 +89,36 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Equals, 1)
 	case:
 		emit_invalid_token(tk)
+	}
+}
+
+emit_string :: proc(tk: ^Tokenizer) {
+	tk_advance_rune(tk)
+	start := tk.offset
+
+	outer: for {
+		switch tk_current_rune(tk) {
+		case '"':
+			break outer
+		case '\\':
+			// real escape sequences are 
+			//   handled in the parser.
+			// this just catches \"
+			tk_advance_rune(tk)
+			tk_advance_rune(tk)
+		case:
+			tk_advance_rune(tk)
+		}
+	}
+
+	end := tk.offset
+	tk_advance_rune(tk)
+
+	str := tk.source[start:end]
+
+	tk.token = {
+		type  = .String_Literal,
+		value = str,
 	}
 }
 

@@ -6,7 +6,8 @@ I don't know much about where this'll go, but here're the plans
 - [x] Basic expression parsing
 - [x] Tree-walk interpreting
 - [x] Variables
-- [ ] Strings
+- [x] Strings
+- [ ] Runtime Errors
 - [ ] If/else
 - [ ] While loops
 - [ ] Standard Functions

@@ -246,6 +246,66 @@ test_assignment_run :: proc(t: ^testing.T) {
 	testing.expect_value(t, read_variable(&rt, "z"), 40)
 }
 
+@(test)
+test_string_tokenization :: proc(t: ^testing.T) {
+	tokens := tokenize_entire_source(`"foo" "bar" "ba\"z"`, context.temp_allocator)
+	testing.expect_value(t, len(tokens), 4)
+	testing.expect_value(t, tokens[0], Token{.String_Literal, "foo"})
+	testing.expect_value(t, tokens[1], Token{.String_Literal, "bar"})
+	testing.expect_value(t, tokens[2], Token{.String_Literal, `ba\"z`})
+}
+
+@(test)
+test_string_parsing :: proc(t: ^testing.T) {
+	p := make_parser(`var name = "rats";`)
+	ast, err := parse_statement(&p)
+	
+	testing.expect_value(t, err, nil)
+	
+	var := expect_and_unwrap(t, ast, ^Variable_Declaration_Node)
+	
+	str := expect_and_unwrap(t, var.value, ^String_Node)
+	
+	testing.expect_value(t, str.value, "rats")
+}
+
+@(test)
+test_string_escape_parsing :: proc(t: ^testing.T) {
+	p := make_parser(`"\n\"\\abc"`)
+	ast, err := parse_expression(&p)
+	
+	testing.expect_value(t, err, nil)
+	
+	str := expect_and_unwrap(t, ast, ^String_Node)
+	
+	testing.expect_value(t, str.value, "\n\"\\abc")
+}
+
+@(test)
+test_string_bad_escape_parsing :: proc(t: ^testing.T) {
+	p := make_parser(`"\q\g\p"`)
+	ast, err := parse_expression(&p)
+	
+	testing.expect(t, err != nil)
+	testing.expect_value(t, err.?.type, Parser_Error_Type.Invalid_Escape) 
+}
+
+@(test)
+test_string_evaluation :: proc(t: ^testing.T) {
+	ast, err := parse_file(`var name = "rats";`, context.temp_allocator)
+	
+	testing.expect_value(t, err, nil)
+
+	rt := Runtime{}
+	defer cleanup_runtime(&rt)
+	
+	execute_statement(&rt, ast)
+	
+	var := read_variable(&rt, "name")
+	
+	testing.expect_value(t, var, "rats")
+}
+
 @(private = "file")
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, ok := v.(T)
@@ -255,11 +315,12 @@ expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_locat
 }
 
 @(private = "file")
-execute_single_expression :: proc(t: ^testing.T, source: string, loc := #caller_location) -> i64 {
+execute_single_expression :: proc(t: ^testing.T, source: string, loc := #caller_location) -> Value {
 	p := make_parser(source)
 	ast, err := parse_expression(&p)
 	testing.expect_value(t, err, nil, loc = loc)
 	rt := Runtime{}
+	defer cleanup_runtime(&rt)
 	return evaluate_expression(&rt, ast)
 }
 
