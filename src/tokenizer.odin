@@ -7,19 +7,21 @@ import "core:unicode/utf8"
 Token_Type :: enum {
 	Invalid = 0,
 	Integer_Literal,
+	Equals,
 	Plus,
 	Minus,
 	Star,
 	Slash,
 	Open_Paren,
 	Close_Paren,
+	Semicolon,
 	Var,
 	Identifier,
 	EOF,
 }
 
 keywords := #partial [Token_Type]string {
-	.Var = "var"
+	.Var = "var",
 }
 
 Token :: struct {
@@ -78,6 +80,10 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Open_Paren, 1)
 	case ')':
 		emit_basic(tk, .Close_Paren, 1)
+	case ';':
+		emit_basic(tk, .Semicolon, 1)
+	case '=':
+		emit_basic(tk, .Equals, 1)
 	case:
 		emit_invalid_token(tk)
 	}
@@ -94,22 +100,22 @@ emit_named :: proc(tk: ^Tokenizer) {
 			break outer
 		}
 	}
-	
+
 	name := tk.source[start:tk.offset]
-	
+
 	for kwd, type in keywords {
 		if kwd == name {
 			tk.token = {
-				type = type,
-				value = name
+				type  = type,
+				value = name,
 			}
-			return 
+			return
 		}
-	} 
-	
+	}
+
 	tk.token = {
-		type = .Identifier,
-		value = name
+		type  = .Identifier,
+		value = name,
 	}
 }
 

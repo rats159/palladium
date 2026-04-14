@@ -58,10 +58,10 @@ test_tokenize_invalid :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_valid_expression :: proc(t: ^testing.T) {
-	source := "1 + 2 + 3"
+	p := make_parser("1 + 2 + 3")
 
-	ast, err := parse_file(source, context.temp_allocator)
-	testing.expect(t, err == nil)
+	ast, err := parse_expression(&p)
+	testing.expect_value(t, err, nil)
 	bin_op := expect_and_unwrap(t, ast, ^Binary_Op_Node)
 	left := expect_and_unwrap(t, bin_op.left, ^Binary_Op_Node)
 	right := expect_and_unwrap(t, bin_op.right, ^Integer_Node)
@@ -73,10 +73,10 @@ test_parse_valid_expression :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_expression_precedence :: proc(t: ^testing.T) {
-	source := "1 + 2 * 3 + 4"
+	p := make_parser("1 + 2 * 3 + 4")
 
-	ast, err := parse_file(source, context.temp_allocator)
-	testing.expect(t, err == nil)
+	ast, err := parse_expression(&p)
+	testing.expect_value(t, err, nil)
 	bin_op := expect_and_unwrap(t, ast, ^Binary_Op_Node)
 	left := expect_and_unwrap(t, bin_op.left, ^Binary_Op_Node)
 	right := expect_and_unwrap(t, bin_op.right, ^Integer_Node)
@@ -99,8 +99,8 @@ test_parse_expression_precedence :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_parentheses :: proc(t: ^testing.T) {
-	source := "(1 + 2) * (3 + 4)"
-	ast, err := parse_file(source, context.temp_allocator)
+	p := make_parser("(1 + 2) * (3 + 4)")
+	ast, err := parse_expression(&p)
 
 	testing.expect_value(t, err, nil)
 
@@ -117,26 +117,26 @@ test_parse_parentheses :: proc(t: ^testing.T) {
 
 @(test)
 test_basic_evaluation :: proc(t: ^testing.T) {
-	val := execute_from_source(t, "1 + 1")
+	val := execute_single_expression(t, "1 + 1")
 	testing.expect_value(t, val, 2)
 }
 
 @(test)
 test_order_of_operations :: proc(t: ^testing.T) {
-	val := execute_from_source(t, "1 + 2 * (3 / 4 - 5) * 6")
+	val := execute_single_expression(t, "1 + 2 * (3 / 4 - 5) * 6")
 	testing.expect_value(t, val, 1 + 2 * (3 / 4 - 5) * 6)
 }
 
 @(test)
 test_associativity :: proc(t: ^testing.T) {
-	val := execute_from_source(t, "1 - 2 - 3 - 4")
+	val := execute_single_expression(t, "1 - 2 - 3 - 4")
 	testing.expect_value(t, val, 1 - 2 - 3 - 4)
 }
 
 @(test)
-identifier_tokenizing :: proc(t: ^testing.T) {
-	tokens := tokenize_entire_source("var xyz 123 foo_bar variable", context.temp_allocator)
-	
+test_identifier_tokenizing :: proc(t: ^testing.T) {
+	tokens := tokenize_entire_source("var xyz 123 foo123_bar variable", context.temp_allocator)
+
 	testing.expect_value(t, len(tokens), 6)
 	testing.expect_value(t, tokens[0].type, Token_Type.Var)
 	testing.expect_value(t, tokens[1].type, Token_Type.Identifier)
@@ -145,17 +145,72 @@ identifier_tokenizing :: proc(t: ^testing.T) {
 	testing.expect_value(t, tokens[4].type, Token_Type.Identifier)
 }
 
+@(test)
+test_variable_read_parsing :: proc(t: ^testing.T) {
+	p := make_parser("x + 12")
+	expr, err := parse_expression(&p)
+	
+	testing.expect_value(t, err, nil)
+	
+	add := expect_and_unwrap(t, expr, ^Binary_Op_Node)
+	
+	left := expect_and_unwrap(t, add.left, ^Variable_Read_Node)
+	right := expect_and_unwrap(t, add.right, ^Integer_Node)
+}
+
+@(test)
+test_variable_declaration :: proc(t: ^testing.T) {
+	p := make_parser("var xyz1 = 10 + 20;")
+	ast, err := parse_statement(&p)
+	testing.expect_value(t, err, nil)
+	
+	var := expect_and_unwrap(t, ast, ^Variable_Declaration_Node)
+	testing.expect_value(t, var.name, "xyz1")
+	
+	value := expect_and_unwrap(t, var.value, ^Binary_Op_Node)
+	
+	actual_val := evaluate_binary_expression(value)
+	testing.expect_value(t, actual_val, 30)
+}
+
+@(test)
+test_multi_statement :: proc(t: ^testing.T) {
+	ast, err := parse_file("1 + 2; 3 + 4; var x = 10 - 3;", context.temp_allocator)
+	testing.expect_value(t, err, nil)
+
+	body := expect_and_unwrap(t, ast, ^Block_Node)
+	testing.expect_value(t, len(body.statements), 3)
+	
+	first := expect_and_unwrap(t, body.statements[0], ^Binary_Op_Node)
+	second := expect_and_unwrap(t, body.statements[1], ^Binary_Op_Node)
+	third := expect_and_unwrap(t, body.statements[2], ^Variable_Declaration_Node)
+}
+
 @(private = "file")
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, ok := v.(T)
-	
+
 	testing.expect_value(t, reflect.union_variant_typeid(v), typeid_of(T), loc = loc)
 	return variant
 }
 
 @(private = "file")
-execute_from_source :: proc(t: ^testing.T, source: string) -> i64 {
-	ast, err := parse_file(source, context.temp_allocator)
-	testing.expect_value(t, err, nil)
+execute_single_expression :: proc(t: ^testing.T, source: string, loc := #caller_location) -> i64 {
+	p := make_parser(source)
+	ast, err := parse_expression(&p)
+	testing.expect_value(t, err, nil, loc = loc)
 	return evaluate_expression(ast)
-} 
+}
+
+@(private = "file")
+make_parser :: proc(source: string) -> Parser {
+	parser := Parser {
+		tokenizer = {source = source},
+		allocator = context.temp_allocator,
+	}
+
+	parser_advance(&parser)
+
+	return parser
+}
+

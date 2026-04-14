@@ -2,7 +2,7 @@ package palladium
 
 import "core:fmt"
 evaluate_expression :: proc(expr: Node) -> i64 {
-	switch type in expr {
+	#partial switch type in expr {
 	case ^Binary_Op_Node:
 		return evaluate_binary_expression(type)
 	case ^Integer_Node:

@@ -9,14 +9,27 @@ Parser :: struct {
 	allocator: runtime.Allocator,
 }
 
+Variable_Declaration_Node :: struct {
+	name: string,
+	value: Node
+}
+
 Integer_Node :: struct {
 	value: i64,
+}
+
+Variable_Read_Node :: struct {
+	name: string
 }
 
 Binary_Op_Node :: struct {
 	left:  Node,
 	right: Node,
 	op:    Token_Type,
+}
+
+Block_Node :: struct {
+	statements: []Node
 }
 
 Parser_Error_Type :: enum {
@@ -32,6 +45,9 @@ Parser_Error :: struct {
 Node :: union {
 	^Binary_Op_Node,
 	^Integer_Node,
+	^Block_Node,
+	^Variable_Declaration_Node,
+	^Variable_Read_Node
 }
 
 parse_file :: proc(
@@ -47,9 +63,52 @@ parse_file :: proc(
 	}
 
 	tk_scan(&p.tokenizer)
-
-	return parse_expression(&p)
+	
+	return parse_statement_list(&p, .EOF)
 }
+
+parse_statement_list :: proc(p: ^Parser, until: Token_Type) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	statements := make([dynamic]Node, p.allocator)
+	for !parser_match(p, until) {
+		statement := parse_statement(p) or_return
+		append(&statements, statement)
+	}
+	
+	node := make_node(p, Block_Node)
+	node.statements = statements[:]
+	
+	return node, nil
+}
+
+parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	#partial switch parser_current(p).type {
+	case .Var:
+		return parse_variable_declaration(p)
+	}
+	
+	return parse_expression_statement(p)
+}
+
+parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .Var) or_return
+	name := parser_expect(p, .Identifier) or_return
+	_ = parser_expect(p, .Equals) or_return
+	value := parse_expression(p) or_return
+	_ = parser_expect(p, .Semicolon) or_return
+	
+	node := make_node(p, Variable_Declaration_Node)
+	node.name = name.value
+	node.value = value
+	
+	return node, nil
+}
+
+parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	expr := parse_expression(p) or_return
+	_ = parser_expect(p, .Semicolon) or_return
+	
+	return expr, nil
+} 
 
 make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 	return new(T, p.allocator)
@@ -102,6 +161,10 @@ parse_value :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		node := make_node(p, Integer_Node)
 		node.value = num
 		return node, nil
+	case .Identifier:
+		node := make_node(p, Variable_Read_Node)
+		node.name = tok.value
+		return node, nil
 	case .Open_Paren:
 		expr := parse_expression(p) or_return
 		parser_expect(p, .Close_Paren) or_return
@@ -133,6 +196,16 @@ parser_match_any :: proc(p: ^Parser, types: ..Token_Type) -> (Token_Type, bool) 
 	}
 
 	return {}, false
+}
+
+parser_match :: proc(p: ^Parser, type: Token_Type) -> bool {
+	token := parser_current(p)
+	if token.type == type {
+		parser_advance(p)
+		return true
+	}
+
+	return false
 }
 
 parser_advance :: proc(p: ^Parser) -> Token {
