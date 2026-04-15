@@ -328,7 +328,7 @@ test_undeclared_error :: proc(t: ^testing.T) {
 }
 
 @(test)
-redeclared_error :: proc(t: ^testing.T) {
+test_redeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x = 10; var x = 20;`, context.temp_allocator)
 	expect_nil(t, err)
 	
@@ -336,6 +336,17 @@ redeclared_error :: proc(t: ^testing.T) {
 	rt_err := execute_statement(&rt, ast)
 	
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Redeclared_Variable)
+}
+
+@(test)
+test_expect_type_error :: proc(t: ^testing.T) {
+	ast, err := parse_file(`var x = "abc" - "def";`, context.temp_allocator)
+	expect_nil(t, err)
+	
+	rt: Runtime
+	rt_err := execute_statement(&rt, ast)
+	
+	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Type_Error)
 }
 
 @(private = "file")

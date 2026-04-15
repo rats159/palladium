@@ -15,6 +15,7 @@ Value :: union {
 Runtime_Error_Type :: enum {
 	Undeclared_Variable,
 	Redeclared_Variable,
+	Type_Error,
 }
 
 Runtime_Error :: struct {
@@ -104,15 +105,35 @@ evaluate_binary_expression :: proc(
 	right := evaluate_expression(rt, expr.right) or_return
 	#partial switch expr.op {
 	case .Plus:
-		return left.(i64) + right.(i64), nil
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left + right, nil
 	case .Minus:
-		return left.(i64) - right.(i64), nil
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left - right, nil
 	case .Star:
-		return left.(i64) * right.(i64), nil
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left * right, nil
 	case .Slash:
-		return left.(i64) / right.(i64), nil
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left / right, nil
 	}
 
 	fmt.panicf("Impossible binary expression operator %s", expr.op)
 }
 
+unwrap_value :: proc(val: Value, $T: typeid) -> (T, Maybe(Runtime_Error)) {
+	unwrapped, ok := val.(T)
+	
+	if ok {
+		return unwrapped, nil
+	}
+	
+	return {}, Runtime_Error {
+		type = .Type_Error, 
+		message = fmt.tprintf("Expected a %s but recieved a %s", reflect.union_variant_typeid(val), typeid_of(T))
+	}
+}
