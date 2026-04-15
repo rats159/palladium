@@ -12,61 +12,105 @@ Value :: union {
 	string,
 }
 
+Runtime_Error_Type :: enum {
+	Undeclared_Variable,
+	Redeclared_Variable,
+}
+
+Runtime_Error :: struct {
+	type:    Runtime_Error_Type,
+	message: string,
+}
+
 cleanup_runtime :: proc(rt: ^Runtime) {
 	delete(rt.variables)
 }
 
-read_variable :: proc(rt: ^Runtime, name: string) -> Value {
-	return rt.variables[name]
+@(require_results)
+read_variable :: proc(rt: ^Runtime, name: string) -> (_val: Value, _err: Maybe(Runtime_Error)) {
+	val, ok := rt.variables[name]
+	if ok do return val, nil
+
+	return {}, Runtime_Error{type = .Undeclared_Variable, message = fmt.tprintf("Undeclared variable '%s'", name)}
 }
 
-execute_statement :: proc(rt: ^Runtime, statement: Node) {
+@require_results
+execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error) {
 	#partial switch type in statement {
 	case ^Variable_Declaration_Node:
-		val := evaluate_expression(rt, type.value)
+		val := evaluate_expression(rt, type.value) or_return
+		var, exists := &rt.variables[type.name]
+		
+		if exists {
+			return Runtime_Error {
+				type = .Redeclared_Variable,
+				message = fmt.tprintf("Redeclared variable '%s'", type.name)
+			}
+		}
 		rt.variables[type.name] = val
+		
 	case ^Block_Node:
 		for stmt in type.statements {
-			execute_statement(rt, stmt)
+			execute_statement(rt, stmt) or_return
 		}
 	case ^Variable_Write_Node:
-		write_variable(rt, type)
+		write_variable(rt, type) or_return
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
+	
+	return nil
 }
 
-write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) {
-	rt.variables[node.name] = evaluate_expression(rt, node.value)
+@require_results
+write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Maybe(Runtime_Error) {
+	var, exists := &rt.variables[node.name]
+	
+	if !exists {
+		return Runtime_Error {
+			type = .Undeclared_Variable,
+			message = fmt.tprintf("Undeclared variable '%s'", node.name)
+		}
+	}
+	
+	var^ = evaluate_expression(rt, node.value) or_return
+	
+	return nil
 }
 
-evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> Value {
+evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Maybe(Runtime_Error)) {
 	#partial switch type in expr {
 	case ^Binary_Op_Node:
 		return evaluate_binary_expression(rt, type)
 	case ^Integer_Node:
-		return type.value
+		return type.value, nil
 	case ^Variable_Read_Node:
 		return read_variable(rt, type.name)
 	case ^String_Node:
-		return type.value
+		return type.value, nil
 	}
 
 	fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(expr))
 }
 
-evaluate_binary_expression :: proc(rt: ^Runtime, expr: ^Binary_Op_Node) -> Value {
-	left := evaluate_expression(rt, expr.left)
-	right := evaluate_expression(rt, expr.right)
+evaluate_binary_expression :: proc(
+	rt: ^Runtime,
+	expr: ^Binary_Op_Node,
+) -> (
+	_val: Value,
+	_err: Maybe(Runtime_Error),
+) {
+	left := evaluate_expression(rt, expr.left) or_return
+	right := evaluate_expression(rt, expr.right) or_return
 	#partial switch expr.op {
 	case .Plus:
-		return left.(i64) + right.(i64)
+		return left.(i64) + right.(i64), nil
 	case .Minus:
-		return left.(i64) - right.(i64)
+		return left.(i64) - right.(i64), nil
 	case .Star:
-		return left.(i64) * right.(i64)
+		return left.(i64) * right.(i64), nil
 	case .Slash:
-		return left.(i64) / right.(i64)
+		return left.(i64) / right.(i64), nil
 	}
 
 	fmt.panicf("Impossible binary expression operator %s", expr.op)

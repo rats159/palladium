@@ -117,19 +117,22 @@ test_parse_parentheses :: proc(t: ^testing.T) {
 
 @(test)
 test_basic_evaluation :: proc(t: ^testing.T) {
-	val := execute_single_expression(t, "1 + 1")
+	val, val_err := execute_single_expression(t, "1 + 1")
+	expect_nil(t, val_err)
 	testing.expect_value(t, val, 2)
 }
 
 @(test)
 test_order_of_operations :: proc(t: ^testing.T) {
-	val := execute_single_expression(t, "1 + 2 * (3 / 4 - 5) * 6")
+	val, val_err := execute_single_expression(t, "1 + 2 * (3 / 4 - 5) * 6")
+	expect_nil(t, val_err)
 	testing.expect_value(t, val, 1 + 2 * (3 / 4 - 5) * 6)
 }
 
 @(test)
 test_associativity :: proc(t: ^testing.T) {
-	val := execute_single_expression(t, "1 - 2 - 3 - 4")
+	val, val_err := execute_single_expression(t, "1 - 2 - 3 - 4")
+	expect_nil(t, val_err)
 	testing.expect_value(t, val, 1 - 2 - 3 - 4)
 }
 
@@ -153,9 +156,10 @@ test_read_variable :: proc(t: ^testing.T) {
 
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
-	execute_statement(&rt, ast)
+	expect_nil(t, execute_statement(&rt, ast))
 
-	val := read_variable(&rt, "z")
+	val, val_err := read_variable(&rt, "z")
+	expect_nil(t, val_err)
 	testing.expect_value(t, val, 400)
 }
 
@@ -169,9 +173,10 @@ test_variable_declaration :: proc(t: ^testing.T) {
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
-	execute_statement(&rt, ast)
+	expect_nil(t, execute_statement(&rt, ast))
 
-	val := read_variable(&rt, "x")
+	val, read_err := read_variable(&rt, "x")
+	expect_nil(t, read_err)
 	testing.expect_value(t, val, 10)
 }
 
@@ -200,8 +205,9 @@ test_variable_declaration_parse :: proc(t: ^testing.T) {
 	value := expect_and_unwrap(t, var.value, ^Binary_Op_Node)
 
 	rt := Runtime{}
-	
-	actual_val := evaluate_binary_expression(&rt, value)
+
+	actual_val, eval_err := evaluate_binary_expression(&rt, value)
+	expect_nil(t, eval_err)
 	testing.expect_value(t, actual_val, 30)
 }
 
@@ -221,29 +227,32 @@ test_multi_statement :: proc(t: ^testing.T) {
 @(test)
 test_assignment_parse :: proc(t: ^testing.T) {
 	ast, err := parse_file("x = 10;", context.temp_allocator)
-	
+
 	testing.expect_value(t, err, nil)
-	
+
 	block := expect_and_unwrap(t, ast, ^Block_Node)
 	assignment := expect_and_unwrap(t, block.statements[0], ^Variable_Write_Node)
-	
+
 	testing.expect_value(t, assignment.name, "x")
 }
 
 @(test)
 test_assignment_run :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x = 10; var y = 20; y = x; x = 30; var z = y + x; x = 15;", context.temp_allocator)
-	
+	ast, err := parse_file(
+		"var x = 10; var y = 20; y = x; x = 30; var z = y + x; x = 15;",
+		context.temp_allocator,
+	)
+
 	testing.expect_value(t, err, nil)
-	
+
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
-	
-	execute_statement(&rt, ast)
-	
-	testing.expect_value(t, read_variable(&rt, "x"), 15)
-	testing.expect_value(t, read_variable(&rt, "y"), 10)
-	testing.expect_value(t, read_variable(&rt, "z"), 40)
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	expect_variable_value(t, &rt, "x", 15)
+	expect_variable_value(t, &rt, "y", 10)
+	expect_variable_value(t, &rt, "z", 40)
 }
 
 @(test)
@@ -259,13 +268,13 @@ test_string_tokenization :: proc(t: ^testing.T) {
 test_string_parsing :: proc(t: ^testing.T) {
 	p := make_parser(`var name = "rats";`)
 	ast, err := parse_statement(&p)
-	
+
 	testing.expect_value(t, err, nil)
-	
+
 	var := expect_and_unwrap(t, ast, ^Variable_Declaration_Node)
-	
+
 	str := expect_and_unwrap(t, var.value, ^String_Node)
-	
+
 	testing.expect_value(t, str.value, "rats")
 }
 
@@ -273,11 +282,11 @@ test_string_parsing :: proc(t: ^testing.T) {
 test_string_escape_parsing :: proc(t: ^testing.T) {
 	p := make_parser(`"\n\"\\abc"`)
 	ast, err := parse_expression(&p)
-	
+
 	testing.expect_value(t, err, nil)
-	
+
 	str := expect_and_unwrap(t, ast, ^String_Node)
-	
+
 	testing.expect_value(t, str.value, "\n\"\\abc")
 }
 
@@ -285,25 +294,48 @@ test_string_escape_parsing :: proc(t: ^testing.T) {
 test_string_bad_escape_parsing :: proc(t: ^testing.T) {
 	p := make_parser(`"\q\g\p"`)
 	ast, err := parse_expression(&p)
-	
+
 	testing.expect(t, err != nil)
-	testing.expect_value(t, err.?.type, Parser_Error_Type.Invalid_Escape) 
+	testing.expect_value(t, err.?.type, Parser_Error_Type.Invalid_Escape)
 }
 
 @(test)
 test_string_evaluation :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var name = "rats";`, context.temp_allocator)
-	
+
 	testing.expect_value(t, err, nil)
 
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
-	
-	execute_statement(&rt, ast)
-	
-	var := read_variable(&rt, "name")
-	
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	var, var_err := read_variable(&rt, "name")
+	testing.expect_value(t, var_err, nil)
+
 	testing.expect_value(t, var, "rats")
+}
+
+@(test)
+test_undeclared_error :: proc(t: ^testing.T) {
+	ast, err := parse_file(`x = 10;`, context.temp_allocator)
+	expect_nil(t, err)
+	
+	rt: Runtime
+	rt_err := execute_statement(&rt, ast)
+	
+	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Undeclared_Variable)
+}
+
+@(test)
+redeclared_error :: proc(t: ^testing.T) {
+	ast, err := parse_file(`var x = 10; var x = 20;`, context.temp_allocator)
+	expect_nil(t, err)
+	
+	rt: Runtime
+	rt_err := execute_statement(&rt, ast)
+	
+	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Redeclared_Variable)
 }
 
 @(private = "file")
@@ -315,7 +347,11 @@ expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_locat
 }
 
 @(private = "file")
-execute_single_expression :: proc(t: ^testing.T, source: string, loc := #caller_location) -> Value {
+execute_single_expression :: proc(
+	t: ^testing.T,
+	source: string,
+	loc := #caller_location,
+) -> (Value, Maybe(Runtime_Error)) {
 	p := make_parser(source)
 	ast, err := parse_expression(&p)
 	testing.expect_value(t, err, nil, loc = loc)
@@ -336,3 +372,13 @@ make_parser :: proc(source: string) -> Parser {
 	return parser
 }
 
+@(private = "file")
+expect_nil :: proc(t: ^testing.T, val: $T, loc := #caller_location) {
+	testing.expect_value(t, val, nil, loc = loc)
+}
+
+@(private = "file")
+expect_variable_value :: proc(t: ^testing.T, rt: ^Runtime, name: string, expected_value: Value, loc := #caller_location) {
+	val, err := read_variable(rt, name)
+	testing.expect_value(t, val, expected_value, loc = loc)
+}
