@@ -22,6 +22,11 @@ Token_Type :: enum {
 	Double_Amp,
 	Exclamation_Point,
 	Double_Equals,
+	Less,
+	Greater,
+	Less_Equals,
+	Greater_Equals,
+	Exclamation_Equals,
 	Identifier,
 	EOF,
 }
@@ -97,7 +102,11 @@ tk_scan :: proc(tk: ^Tokenizer) {
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
 	case '!':
-		emit_basic(tk, .Exclamation_Point, 1)
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Exclamation_Equals, 2)
+		} else {
+			emit_basic(tk, .Exclamation_Point, 1)
+		}
 	case '=':
 		if tk_next_rune(tk) == '=' {
 			emit_basic(tk, .Double_Equals, 2)
@@ -115,6 +124,18 @@ tk_scan :: proc(tk: ^Tokenizer) {
 			emit_basic(tk, .Double_Amp, 2)
 		} else {
 			emit_invalid_token(tk)
+		}
+	case '>':
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Greater_Equals, 2)
+		} else {
+			emit_basic(tk, .Greater, 1)
+		}
+	case '<':
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Less_Equals, 2)
+		} else {
+			emit_basic(tk, .Less, 1)
 		}
 	case:
 		emit_invalid_token(tk)

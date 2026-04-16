@@ -181,10 +181,10 @@ parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 }
 
 parse_or :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_add(p) or_return
+	left := parse_compare(p) or_return
 
 	for op in parser_match_any(p, .Double_Pipe) {
-		right := parse_add(p) or_return
+		right := parse_compare(p) or_return
 		new_node := make_node(p, Binary_Op_Node)
 		new_node.left = left
 		new_node.right = right
@@ -192,6 +192,21 @@ parse_or :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		left = new_node
 	}
 
+	return left, nil
+}
+
+parse_compare :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
+    left := parse_add(p) or_return
+   
+	for op in parser_match_any(p, .Less, .Less_Equals, .Greater, .Greater_Equals) {
+		right := parse_add(p) or_return
+		new_node := make_node(p, Binary_Op_Node)
+		new_node.left = left
+		new_node.right = right
+		new_node.op = op
+		left = new_node
+	}
+   
 	return left, nil
 }
 

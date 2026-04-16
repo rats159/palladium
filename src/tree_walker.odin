@@ -97,36 +97,36 @@ evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Maybe(Runtime_E
 }
 
 evaluate_short_circuiting_binary_expression :: proc(
-		rt: ^Runtime,
-		expr: ^Binary_Op_Node,
+	rt: ^Runtime,
+	expr: ^Binary_Op_Node,
 ) -> (
-		_val: Value,
-		_err: Maybe(Runtime_Error),
+	_val: Value,
+	_err: Maybe(Runtime_Error),
 ) {
-    left := evaluate_expression(rt, expr.left) or_return
+	left := evaluate_expression(rt, expr.left) or_return
 	#partial switch expr.op {
 	case .Double_Pipe:
 		left := unwrap_value(left, bool) or_return
-		
+
 		if left do return true, nil
-		
-	    right := evaluate_expression(rt, expr.right) or_return
+
+		right := evaluate_expression(rt, expr.right) or_return
 		right_raw := unwrap_value(right, bool) or_return
-		
+
 		if right_raw do return true, nil
-		
+
 		return false, nil
 	case .Double_Amp:
-    	left := unwrap_value(left, bool) or_return
-    	
-    	if !left do return false, nil
-    	
-        right := evaluate_expression(rt, expr.right) or_return
-    	right_raw := unwrap_value(right, bool) or_return
-    	
-    	if !right_raw do return false, nil
-    	
-    	return true, nil
+		left := unwrap_value(left, bool) or_return
+
+		if !left do return false, nil
+
+		right := evaluate_expression(rt, expr.right) or_return
+		right_raw := unwrap_value(right, bool) or_return
+
+		if !right_raw do return false, nil
+
+		return true, nil
 	}
 
 	fmt.panicf("Impossible binary expression operator %s", expr.op)
@@ -140,20 +140,20 @@ evaluate_binary_expression :: proc(
 	_err: Maybe(Runtime_Error),
 ) {
 	if short_circuits(expr.op) {
-	    return evaluate_short_circuiting_binary_expression(rt, expr)
+		return evaluate_short_circuiting_binary_expression(rt, expr)
 	} else {
-	    return evaluate_regular_binary_expression(rt, expr)
+		return evaluate_regular_binary_expression(rt, expr)
 	}
-}	
+}
 
 evaluate_regular_binary_expression :: proc(
-		rt: ^Runtime,
-		expr: ^Binary_Op_Node,
+	rt: ^Runtime,
+	expr: ^Binary_Op_Node,
 ) -> (
-		_val: Value,
-		_err: Maybe(Runtime_Error),
+	_val: Value,
+	_err: Maybe(Runtime_Error),
 ) {
-    left := evaluate_expression(rt, expr.left) or_return
+	left := evaluate_expression(rt, expr.left) or_return
 	right := evaluate_expression(rt, expr.right) or_return
 	#partial switch expr.op {
 	case .Plus:
@@ -172,9 +172,24 @@ evaluate_regular_binary_expression :: proc(
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left / right, nil
-
 	case .Double_Equals:
 		return left == right, nil
+	case .Less:
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left < right, nil
+	case .Greater:
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left > right, nil
+	case .Less_Equals:
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left <= right, nil
+	case .Greater_Equals:
+		left := unwrap_value(left, i64) or_return
+		right := unwrap_value(right, i64) or_return
+		return left >= right, nil
 	}
 
 	fmt.panicf("Impossible binary expression operator %s", expr.op)

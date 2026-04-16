@@ -500,6 +500,38 @@ test_equality_evaluate :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_comparison_op_eval_true :: proc(t: ^testing.T) {
+    ast, err := parse_file("var l = 2 < 3; var g = 10 > 4; var le = 4 <= 4; var ge = 5 >= 5;", context.temp_allocator)
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_statement(&rt, ast))
+    
+    expect_variable_value(t, &rt, "l", true)
+    expect_variable_value(t, &rt, "g", true)
+    expect_variable_value(t, &rt, "le", true)
+    expect_variable_value(t, &rt, "ge", true)
+}
+
+@(test)
+test_comparison_op_eval_false :: proc(t: ^testing.T) {
+    ast, err := parse_file("var l = 20 < 5; var g = 12 > 14; var le = 10 <= 4; var ge = 5 >= 60;", context.temp_allocator)
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_statement(&rt, ast))
+    
+    expect_variable_value(t, &rt, "l", false)
+    expect_variable_value(t, &rt, "g", false)
+    expect_variable_value(t, &rt, "le", false)
+    expect_variable_value(t, &rt, "ge", false)
+}
+
+@(test)
 test_equality_parse :: proc(t: ^testing.T) {
     p := make_parser("1 || 2 == 3 + 4")
     ast, err := parse_expression(&p)
@@ -508,6 +540,47 @@ test_equality_parse :: proc(t: ^testing.T) {
     
     eq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
     testing.expect_value(t, eq.op, Token_Type.Double_Equals)
+}
+
+@(test)
+test_comparison_op_tokens :: proc(t: ^testing.T) {
+    tokens := tokenize_entire_source("><<=>===!=<==!=<<===", context.temp_allocator)
+
+    testing.expect_value(t, len(tokens), 13)
+
+    types := [13]Token_Type {
+        .Greater,
+        .Less,
+        .Less_Equals,
+        .Greater_Equals,
+        .Double_Equals,
+        .Exclamation_Equals,
+        .Less_Equals,
+        .Equals,
+        .Exclamation_Equals,
+        .Less,
+        .Less_Equals,
+        .Double_Equals,
+        .EOF
+    }
+
+    for tk, i in tokens {
+        testing.expect_value(t, tk.type, types[i])
+    }
+}
+
+@(test)
+test_comparison_op_parsing :: proc(t: ^testing.T) {
+    p := make_parser("a < b || b < c && c >= d")
+    ast, err := parse_expression(&p)
+    expect_nil(t, err)
+    
+    and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    testing.expect_value(t, and.op, Token_Type.Double_Amp)
+    
+    right := expect_and_unwrap(t, and.right, ^Binary_Op_Node)
+    
+    testing.expect_value(t, right.op, Token_Type.Greater_Equals)
 }
 
 @(private = "file", require_results)
