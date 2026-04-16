@@ -19,14 +19,18 @@ Token_Type :: enum {
 	Var,
 	True,
 	False,
+	Double_Pipe,
+	Double_Amp,
+	Exclamation_Point,
+	Double_Equals,
 	Identifier,
 	EOF,
 }
 
 keywords := #partial [Token_Type]string {
-	.Var = "var",
-	.True = "true",
-	.False = "false"
+	.Var   = "var",
+	.True  = "true",
+	.False = "false",
 }
 
 Token :: struct {
@@ -61,6 +65,10 @@ tk_current_rune :: proc(tk: ^Tokenizer) -> rune {
 	return utf8.rune_at(tk.source, tk.offset)
 }
 
+tk_next_rune :: proc(tk: ^Tokenizer, distance: int = 1) -> rune {
+	return utf8.rune_at_pos(tk.source[tk.offset:], distance)
+}
+
 tk_scan :: proc(tk: ^Tokenizer) {
 	skip_whitespace(tk)
 	switch tk_current_rune(tk) {
@@ -89,8 +97,26 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Close_Paren, 1)
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
+	case '!':
+		emit_basic(tk, .Exclamation_Point, 1)
 	case '=':
-		emit_basic(tk, .Equals, 1)
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Double_Equals, 2)
+		} else {
+			emit_basic(tk, .Equals, 1)
+		}
+	case '|':
+		if tk_next_rune(tk) == '|' {
+			emit_basic(tk, .Double_Pipe, 2)
+		} else {
+			emit_invalid_token(tk)
+		}
+	case '&':
+		if tk_next_rune(tk) == '&' {
+			emit_basic(tk, .Double_Amp, 2)
+		} else {
+			emit_invalid_token(tk)
+		}
 	case:
 		emit_invalid_token(tk)
 	}
@@ -105,7 +131,7 @@ emit_string :: proc(tk: ^Tokenizer) {
 		case '"':
 			break outer
 		case '\\':
-			// real escape sequences are 
+			// real escape sequences are
 			//   handled in the parser.
 			// this just catches \"
 			tk_advance_rune(tk)

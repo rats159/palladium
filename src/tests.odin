@@ -391,7 +391,125 @@ test_evaluate_booleans :: proc(t: ^testing.T) {
     expect_variable_value(t, &rt, "x", true)
 }
 
-@(private = "file")
+@(test)
+test_tokenize_bool_ops :: proc(t: ^testing.T) {
+    tokens := tokenize_entire_source("|| && !", context.temp_allocator)
+    
+    testing.expect_value(t, len(tokens), 4)
+    
+    testing.expect_value(t, tokens[0].type, Token_Type.Double_Pipe)
+    testing.expect_value(t, tokens[1].type, Token_Type.Double_Amp)
+    testing.expect_value(t, tokens[2].type, Token_Type.Exclamation_Point)
+}
+
+@(test)
+test_parse_bool_ops :: proc(t: ^testing.T) {
+    p := make_parser("true || false && false || !false")
+    ast, err := parse_expression(&p)
+    
+    testing.expect_value(t, err, nil)
+    
+    and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    testing.expect_value(t, and.op, Token_Type.Double_Amp)
+    
+    left := expect_and_unwrap(t,and.left, ^Binary_Op_Node)
+    right := expect_and_unwrap(t,and.right, ^Binary_Op_Node)
+    
+    testing.expect_value(t, left.op, Token_Type.Double_Pipe)
+    testing.expect_value(t, right.op, Token_Type.Double_Pipe)
+    
+    right_right := expect_and_unwrap(t, right.right, ^Unary_Op_Node)
+    testing.expect_value(t, right_right.op, Token_Type.Exclamation_Point)
+}
+
+@(test)
+test_bool_op_precedence :: proc(t: ^testing.T) {
+    p := make_parser("1 + 1 || 2 * 2")
+    ast, err := parse_expression(&p)
+    
+    testing.expect_value(t, err, nil)
+    
+    or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    testing.expect_value(t, or.op, Token_Type.Double_Pipe)
+    
+    left := expect_and_unwrap(t,or.left, ^Binary_Op_Node)
+    right := expect_and_unwrap(t,or.right, ^Binary_Op_Node)
+    
+    testing.expect_value(t, left.op, Token_Type.Plus)
+    testing.expect_value(t, right.op, Token_Type.Star)
+}
+
+@(test)
+test_bool_op_precedence_2 :: proc(t: ^testing.T) {
+    p := make_parser("!a + !b")
+    ast, err := parse_expression(&p)
+    
+    testing.expect_value(t, err, nil)
+    
+    or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    testing.expect_value(t, or.op, Token_Type.Plus)
+    
+    left := expect_and_unwrap(t,or.left, ^Unary_Op_Node)
+    right := expect_and_unwrap(t,or.right, ^Unary_Op_Node)
+    
+    testing.expect_value(t, left.op, Token_Type.Exclamation_Point)
+    testing.expect_value(t, right.op, Token_Type.Exclamation_Point)
+}
+
+@(test)
+test_unary_nesting_parse :: proc(t: ^testing.T) {
+    p := make_parser("!!!a")
+    ast, err := parse_expression(&p)
+    
+    testing.expect_value(t, err, nil)
+    
+    first := expect_and_unwrap(t, ast, ^Unary_Op_Node)
+    second := expect_and_unwrap(t, first.node, ^Unary_Op_Node)
+    third := expect_and_unwrap(t, second.node, ^Unary_Op_Node)
+}
+
+@(test)
+test_single_double_eq_tokenize :: proc(t: ^testing.T) {
+    tokens := tokenize_entire_source("= == = = =========", context.temp_allocator)
+    testing.expect_value(t, len(tokens), 10)
+    
+    testing.expect_value(t, tokens[0].type, Token_Type.Equals)
+    testing.expect_value(t, tokens[1].type, Token_Type.Double_Equals)
+    testing.expect_value(t, tokens[2].type, Token_Type.Equals)
+    testing.expect_value(t, tokens[3].type, Token_Type.Equals)
+    testing.expect_value(t, tokens[4].type, Token_Type.Double_Equals)
+    testing.expect_value(t, tokens[5].type, Token_Type.Double_Equals)
+    testing.expect_value(t, tokens[6].type, Token_Type.Double_Equals)
+    testing.expect_value(t, tokens[7].type, Token_Type.Double_Equals)
+    testing.expect_value(t, tokens[8].type, Token_Type.Equals)
+}
+
+@(test)
+test_equality_evaluate :: proc(t: ^testing.T) {
+    ast, err := parse_file("var yes = 1 + 3 == 2 + 2; var no = true || false == false && true;", context.temp_allocator)
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_statement(&rt, ast))
+    
+    expect_variable_value(t, &rt, "yes", true)
+    expect_variable_value(t, &rt, "no", false)
+}
+
+@(test)
+test_equality_parse :: proc(t: ^testing.T) {
+    p := make_parser("1 || 2 == 3 + 4")
+    ast, err := parse_expression(&p)
+    
+    testing.expect_value(t, err, nil)
+    
+    eq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    testing.expect_value(t, eq.op, Token_Type.Double_Equals)
+}
+
+@(private = "file", require_results)
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, ok := v.(T)
 

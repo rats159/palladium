@@ -44,6 +44,11 @@ Binary_Op_Node :: struct {
 	op:    Token_Type,
 }
 
+Unary_Op_Node :: struct {
+	node: Node,
+	op:   Token_Type,
+}
+
 Block_Node :: struct {
 	statements: []Node,
 }
@@ -62,6 +67,7 @@ Parser_Error :: struct {
 
 Node :: union {
 	^Binary_Op_Node,
+	^Unary_Op_Node,
 	^Integer_Node,
 	^String_Node,
 	^Boolean_Node,
@@ -157,7 +163,7 @@ make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 }
 
 // Alias for the lowest-precedence expression
-parse_expression :: parse_add
+parse_expression :: parse_equality
 
 parse_assignment :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 	assignee := parse_expression(p) or_return
@@ -167,6 +173,51 @@ parse_assignment :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error))
 	}
 
 	return assignee, nil
+}
+
+parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
+    left := parse_and(p) or_return
+    
+   	for op in parser_match_any(p, .Double_Equals) {
+		right := parse_and(p) or_return
+		new_node := make_node(p, Binary_Op_Node)
+		new_node.left = left
+		new_node.right = right
+		new_node.op = op
+		left = new_node
+	}
+   
+	return left, nil
+}
+
+parse_or :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
+	left := parse_add(p) or_return
+
+	for op in parser_match_any(p, .Double_Pipe) {
+		right := parse_add(p) or_return
+		new_node := make_node(p, Binary_Op_Node)
+		new_node.left = left
+		new_node.right = right
+		new_node.op = op
+		left = new_node
+	}
+
+	return left, nil
+}
+
+parse_and :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
+	left := parse_or(p) or_return
+
+	for op in parser_match_any(p, .Double_Amp) {
+		right := parse_or(p) or_return
+		new_node := make_node(p, Binary_Op_Node)
+		new_node.left = left
+		new_node.right = right
+		new_node.op = op
+		left = new_node
+	}
+
+	return left, nil
 }
 
 parse_add :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
@@ -185,10 +236,10 @@ parse_add :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 }
 
 parse_mul :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_value(p) or_return
+	left := parse_unary(p) or_return
 
 	for op in parser_match_any(p, .Star, .Slash) {
-		right := parse_value(p) or_return
+		right := parse_unary(p) or_return
 		new_node := make_node(p, Binary_Op_Node)
 		new_node.left = left
 		new_node.right = right
@@ -197,6 +248,20 @@ parse_mul :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 	}
 
 	return left, nil
+}
+
+parse_unary :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
+	if op, matched := parser_match_any(p, .Exclamation_Point); matched {
+		underlying_node := parse_unary(p) or_return
+
+		node := make_node(p, Unary_Op_Node)
+		node.node = underlying_node
+		node.op = op
+
+		return node, nil
+	} else {
+		return parse_value(p)
+	}
 }
 
 // leaks on error. use an arena or be okay with leaks
