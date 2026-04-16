@@ -7,7 +7,9 @@ I don't know much about where this'll go, but here're the plans
 - [x] Tree-walk interpreting
 - [x] Variables
 - [x] Strings
-- [ ] Runtime Errors
+- [x] Runtime Errors
+- [x] Booleans
+- [ ] Comparison Operators
 - [ ] If/else
 - [ ] While loops
 - [ ] Standard Functions

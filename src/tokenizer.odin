@@ -17,12 +17,16 @@ Token_Type :: enum {
 	Close_Paren,
 	Semicolon,
 	Var,
+	True,
+	False,
 	Identifier,
 	EOF,
 }
 
 keywords := #partial [Token_Type]string {
 	.Var = "var",
+	.True = "true",
+	.False = "false"
 }
 
 Token :: struct {

@@ -10,6 +10,7 @@ Runtime :: struct {
 Value :: union {
 	i64,
 	string,
+	bool
 }
 
 Runtime_Error_Type :: enum {
@@ -85,6 +86,8 @@ evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Maybe(Runtime_E
 		return evaluate_binary_expression(rt, type)
 	case ^Integer_Node:
 		return type.value, nil
+	case ^Boolean_Node:
+	    return type.value, nil
 	case ^Variable_Read_Node:
 		return read_variable(rt, type.name)
 	case ^String_Node:

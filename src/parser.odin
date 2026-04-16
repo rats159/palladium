@@ -30,6 +30,10 @@ Integer_Node :: struct {
 	value: i64,
 }
 
+Boolean_Node :: struct {
+	value: bool,
+}
+
 Variable_Read_Node :: struct {
 	name: string,
 }
@@ -60,6 +64,7 @@ Node :: union {
 	^Binary_Op_Node,
 	^Integer_Node,
 	^String_Node,
+	^Boolean_Node,
 	^Block_Node,
 	^Variable_Declaration_Node,
 	^Variable_Read_Node,
@@ -219,11 +224,11 @@ parse_string :: proc(p: ^Parser, value: string) -> (string, Maybe(Parser_Error))
 			case '\\':
 				strings.write_byte(&buf, '\\')
 				i += 1
-			
+
 			case:
 				return "", Parser_Error {
 					type = .Invalid_Escape,
-					message = fmt.tprintf("Invalid escape sequence '\\%c'", escape_char)
+					message = fmt.tprintf("Invalid escape sequence '\\%c'", escape_char),
 				}
 			}
 		} else {
@@ -248,6 +253,14 @@ parse_value :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		num := parse_integer(tok.value)
 		node := make_node(p, Integer_Node)
 		node.value = num
+		return node, nil
+	case .True:
+		node := make_node(p, Boolean_Node)
+		node.value = true
+		return node, nil
+	case .False:
+		node := make_node(p, Boolean_Node)
+		node.value = false
 		return node, nil
 	case .String_Literal:
 		str := parse_string(p, tok.value) or_return

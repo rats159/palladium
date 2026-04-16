@@ -333,6 +333,7 @@ test_redeclared_error :: proc(t: ^testing.T) {
 	expect_nil(t, err)
 	
 	rt: Runtime
+	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
 	
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Redeclared_Variable)
@@ -347,6 +348,47 @@ test_expect_type_error :: proc(t: ^testing.T) {
 	rt_err := execute_statement(&rt, ast)
 	
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Type_Error)
+}
+
+@(test)
+test_tokenize_booleans :: proc(t: ^testing.T) {
+    tokens := tokenize_entire_source("true false atrue falsey", context.temp_allocator)
+    testing.expect_value(t, len(tokens), 5)
+    
+    testing.expect_value(t, tokens[0].type, Token_Type.True)
+    testing.expect_value(t, tokens[1].type, Token_Type.False)
+    testing.expect_value(t, tokens[2].type, Token_Type.Identifier)
+    testing.expect_value(t, tokens[3].type, Token_Type.Identifier)
+}
+
+@(test)
+test_parse_booleans :: proc(t: ^testing.T) {
+    p := make_parser("true + false")
+    ast, err := parse_expression(&p)
+    expect_nil(t, err)
+    
+    add := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    
+    left := expect_and_unwrap(t, add.left, ^Boolean_Node)
+    right := expect_and_unwrap(t, add.right, ^Boolean_Node)
+    
+    testing.expect_value(t, left.value, true)
+    testing.expect_value(t, right.value, false)
+}
+
+@(test)
+test_evaluate_booleans :: proc(t: ^testing.T) {
+    ast, err := parse_file("var x = true;", context.temp_allocator)
+    
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    rt_err := execute_statement(&rt, ast)
+    expect_nil(t, rt_err)
+    
+    expect_variable_value(t, &rt, "x", true)
 }
 
 @(private = "file")
