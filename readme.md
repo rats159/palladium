@@ -9,7 +9,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Strings
 - [x] Runtime Errors
 - [x] Booleans
-- [ ] Comparison Operators
+- [x] Comparison Operators
 - [ ] If/else
 - [ ] While loops
 - [ ] Standard Functions
