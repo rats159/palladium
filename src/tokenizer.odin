@@ -1,7 +1,6 @@
 package palladium
 
 import "base:runtime"
-import "core:strings"
 import "core:unicode/utf8"
 
 Token_Type :: enum {
@@ -188,10 +187,6 @@ emit_basic :: proc(tk: ^Tokenizer, type: Token_Type, byte_length: int) {
 		value = tk.source[tk.offset:tk.offset + byte_length],
 	}
 	tk.offset += byte_length
-}
-
-tk_is_done :: proc(tk: ^Tokenizer) -> bool {
-	return tk.offset > len(tk.source)
 }
 
 emit_number :: proc(tk: ^Tokenizer) {

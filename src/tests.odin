@@ -1,6 +1,7 @@
+#+test
+
 package palladium
 
-import "core:fmt"
 import "core:reflect"
 import "core:testing"
 
@@ -189,8 +190,8 @@ test_variable_read_parsing :: proc(t: ^testing.T) {
 
 	add := expect_and_unwrap(t, expr, ^Binary_Op_Node)
 
-	left := expect_and_unwrap(t, add.left, ^Variable_Read_Node)
-	right := expect_and_unwrap(t, add.right, ^Integer_Node)
+	_ = expect_and_unwrap(t, add.left, ^Variable_Read_Node)
+	_ = expect_and_unwrap(t, add.right, ^Integer_Node)
 }
 
 @(test)
@@ -219,9 +220,9 @@ test_multi_statement :: proc(t: ^testing.T) {
 	body := expect_and_unwrap(t, ast, ^Block_Node)
 	testing.expect_value(t, len(body.statements), 3)
 
-	first := expect_and_unwrap(t, body.statements[0], ^Binary_Op_Node)
-	second := expect_and_unwrap(t, body.statements[1], ^Binary_Op_Node)
-	third := expect_and_unwrap(t, body.statements[2], ^Variable_Declaration_Node)
+	_ = expect_and_unwrap(t, body.statements[0], ^Binary_Op_Node)
+	_ = expect_and_unwrap(t, body.statements[1], ^Binary_Op_Node)
+	_ = expect_and_unwrap(t, body.statements[2], ^Variable_Declaration_Node)
 }
 
 @(test)
@@ -293,7 +294,7 @@ test_string_escape_parsing :: proc(t: ^testing.T) {
 @(test)
 test_string_bad_escape_parsing :: proc(t: ^testing.T) {
 	p := make_parser(`"\q\g\p"`)
-	ast, err := parse_expression(&p)
+	_, err := parse_expression(&p)
 
 	testing.expect(t, err != nil)
 	testing.expect_value(t, err.?.type, Parser_Error_Type.Invalid_Escape)
@@ -465,7 +466,7 @@ test_unary_nesting_parse :: proc(t: ^testing.T) {
     
     first := expect_and_unwrap(t, ast, ^Unary_Op_Node)
     second := expect_and_unwrap(t, first.node, ^Unary_Op_Node)
-    third := expect_and_unwrap(t, second.node, ^Unary_Op_Node)
+    _ = expect_and_unwrap(t, second.node, ^Unary_Op_Node)
 }
 
 @(test)
@@ -511,7 +512,7 @@ test_equality_parse :: proc(t: ^testing.T) {
 
 @(private = "file", require_results)
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
-	variant, ok := v.(T)
+	variant, _ := v.(T)
 
 	testing.expect_value(t, reflect.union_variant_typeid(v), typeid_of(T), loc = loc)
 	return variant
@@ -551,5 +552,6 @@ expect_nil :: proc(t: ^testing.T, val: $T, loc := #caller_location) {
 @(private = "file")
 expect_variable_value :: proc(t: ^testing.T, rt: ^Runtime, name: string, expected_value: Value, loc := #caller_location) {
 	val, err := read_variable(rt, name)
+	expect_nil(t, err)
 	testing.expect_value(t, val, expected_value, loc = loc)
 }

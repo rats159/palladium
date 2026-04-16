@@ -165,16 +165,6 @@ make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 // Alias for the lowest-precedence expression
 parse_expression :: parse_equality
 
-parse_assignment :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
-	assignee := parse_expression(p) or_return
-
-	if parser_match(p, .Equals) {
-
-	}
-
-	return assignee, nil
-}
-
 parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
     left := parse_and(p) or_return
     

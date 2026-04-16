@@ -41,9 +41,8 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error)
 	#partial switch type in statement {
 	case ^Variable_Declaration_Node:
 		val := evaluate_expression(rt, type.value) or_return
-		var, exists := &rt.variables[type.name]
 
-		if exists {
+		if type.name in rt.variables {
 			return Runtime_Error {
 				type = .Redeclared_Variable,
 				message = fmt.tprintf("Redeclared variable '%s'", type.name),
