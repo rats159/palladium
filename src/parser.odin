@@ -148,10 +148,7 @@ parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error
 			_ = parser_expect(p, .Open_Curly) or_return
 			else_body = parse_statement_list(p, .Close_Curly) or_return
 		case:
-			return {}, Parser_Error {
-				type = .Failed_Expectation,
-				message = fmt.tprintf("Token %s does not begin an else block", parser_current(p).type),
-			}
+			return {}, Parser_Error{type = .Failed_Expectation, message = fmt.tprintf("Token %s does not begin an else block", parser_current(p).type)}
 		}
 	}
 
@@ -208,9 +205,9 @@ make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 parse_expression :: parse_equality
 
 parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-    left := parse_and(p) or_return
-    
-   	for op in parser_match_any(p, .Double_Equals) {
+	left := parse_and(p) or_return
+
+	for op in parser_match_any(p, .Double_Equals) {
 		right := parse_and(p) or_return
 		new_node := make_node(p, Binary_Op_Node)
 		new_node.left = left
@@ -219,7 +216,7 @@ parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		left = new_node
 	}
 
-   
+
 	return left, nil
 }
 
@@ -234,13 +231,13 @@ parse_or :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		new_node.op = op
 		left = new_node
 	}
-   
+
 	return left, nil
 }
 
 parse_compare :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-    left := parse_add(p) or_return
-   
+	left := parse_add(p) or_return
+
 	for op in parser_match_any(p, .Less, .Less_Equals, .Greater, .Greater_Equals) {
 		right := parse_add(p) or_return
 		new_node := make_node(p, Binary_Op_Node)
@@ -249,7 +246,7 @@ parse_compare :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		new_node.op = op
 		left = new_node
 	}
-   
+
 	return left, nil
 }
 

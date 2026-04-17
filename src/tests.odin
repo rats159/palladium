@@ -2,8 +2,8 @@
 
 package palladium
 
-import "core:reflect"
 import "core:log"
+import "core:reflect"
 import "core:testing"
 
 @(test)
@@ -322,10 +322,10 @@ test_string_evaluation :: proc(t: ^testing.T) {
 test_undeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`x = 10;`, context.temp_allocator)
 	expect_nil(t, err)
-	
+
 	rt: Runtime
 	rt_err := execute_statement(&rt, ast)
-	
+
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Undeclared_Variable)
 }
 
@@ -333,11 +333,11 @@ test_undeclared_error :: proc(t: ^testing.T) {
 test_redeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x = 10; var x = 20;`, context.temp_allocator)
 	expect_nil(t, err)
-	
+
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
-	
+
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Redeclared_Variable)
 }
 
@@ -345,202 +345,211 @@ test_redeclared_error :: proc(t: ^testing.T) {
 test_expect_type_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x = "abc" - "def";`, context.temp_allocator)
 	expect_nil(t, err)
-	
+
 	rt: Runtime
 	rt_err := execute_statement(&rt, ast)
-	
+
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Type_Error)
 }
 
 @(test)
 test_tokenize_booleans :: proc(t: ^testing.T) {
-    tokens := tokenize_entire_source("true false atrue falsey", context.temp_allocator)
-    testing.expect_value(t, len(tokens), 5)
-    
-    testing.expect_value(t, tokens[0].type, Token_Type.True)
-    testing.expect_value(t, tokens[1].type, Token_Type.False)
-    testing.expect_value(t, tokens[2].type, Token_Type.Identifier)
-    testing.expect_value(t, tokens[3].type, Token_Type.Identifier)
+	tokens := tokenize_entire_source("true false atrue falsey", context.temp_allocator)
+	testing.expect_value(t, len(tokens), 5)
+
+	testing.expect_value(t, tokens[0].type, Token_Type.True)
+	testing.expect_value(t, tokens[1].type, Token_Type.False)
+	testing.expect_value(t, tokens[2].type, Token_Type.Identifier)
+	testing.expect_value(t, tokens[3].type, Token_Type.Identifier)
 }
 
 @(test)
 test_parse_booleans :: proc(t: ^testing.T) {
-    p := make_parser("true + false")
-    ast, err := parse_expression(&p)
-    expect_nil(t, err)
-    
-    add := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-    
-    left := expect_and_unwrap(t, add.left, ^Boolean_Node)
-    right := expect_and_unwrap(t, add.right, ^Boolean_Node)
-    
-    testing.expect_value(t, left.value, true)
-    testing.expect_value(t, right.value, false)
+	p := make_parser("true + false")
+	ast, err := parse_expression(&p)
+	expect_nil(t, err)
+
+	add := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+
+	left := expect_and_unwrap(t, add.left, ^Boolean_Node)
+	right := expect_and_unwrap(t, add.right, ^Boolean_Node)
+
+	testing.expect_value(t, left.value, true)
+	testing.expect_value(t, right.value, false)
 }
 
 @(test)
 test_evaluate_booleans :: proc(t: ^testing.T) {
-    ast, err := parse_file("var x = true;", context.temp_allocator)
-    
-    expect_nil(t, err)
-    
-    rt: Runtime
-    defer cleanup_runtime(&rt)
-    
-    rt_err := execute_statement(&rt, ast)
-    expect_nil(t, rt_err)
-    
-    expect_variable_value(t, &rt, "x", true)
+	ast, err := parse_file("var x = true;", context.temp_allocator)
+
+	expect_nil(t, err)
+
+	rt: Runtime
+	defer cleanup_runtime(&rt)
+
+	rt_err := execute_statement(&rt, ast)
+	expect_nil(t, rt_err)
+
+	expect_variable_value(t, &rt, "x", true)
 }
 
 @(test)
 test_tokenize_bool_ops :: proc(t: ^testing.T) {
-    tokens := tokenize_entire_source("|| && !", context.temp_allocator)
-    
-    testing.expect_value(t, len(tokens), 4)
-    
-    testing.expect_value(t, tokens[0].type, Token_Type.Double_Pipe)
-    testing.expect_value(t, tokens[1].type, Token_Type.Double_Amp)
-    testing.expect_value(t, tokens[2].type, Token_Type.Exclamation_Point)
+	tokens := tokenize_entire_source("|| && !", context.temp_allocator)
+
+	testing.expect_value(t, len(tokens), 4)
+
+	testing.expect_value(t, tokens[0].type, Token_Type.Double_Pipe)
+	testing.expect_value(t, tokens[1].type, Token_Type.Double_Amp)
+	testing.expect_value(t, tokens[2].type, Token_Type.Exclamation_Point)
 }
 
 @(test)
 test_parse_bool_ops :: proc(t: ^testing.T) {
-    p := make_parser("true || false && false || !false")
-    ast, err := parse_expression(&p)
-    
-    testing.expect_value(t, err, nil)
-    
-    and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-    testing.expect_value(t, and.op, Token_Type.Double_Amp)
-    
-    left := expect_and_unwrap(t,and.left, ^Binary_Op_Node)
-    right := expect_and_unwrap(t,and.right, ^Binary_Op_Node)
-    
-    testing.expect_value(t, left.op, Token_Type.Double_Pipe)
-    testing.expect_value(t, right.op, Token_Type.Double_Pipe)
-    
-    right_right := expect_and_unwrap(t, right.right, ^Unary_Op_Node)
-    testing.expect_value(t, right_right.op, Token_Type.Exclamation_Point)
+	p := make_parser("true || false && false || !false")
+	ast, err := parse_expression(&p)
+
+	testing.expect_value(t, err, nil)
+
+	and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+	testing.expect_value(t, and.op, Token_Type.Double_Amp)
+
+	left := expect_and_unwrap(t, and.left, ^Binary_Op_Node)
+	right := expect_and_unwrap(t, and.right, ^Binary_Op_Node)
+
+	testing.expect_value(t, left.op, Token_Type.Double_Pipe)
+	testing.expect_value(t, right.op, Token_Type.Double_Pipe)
+
+	right_right := expect_and_unwrap(t, right.right, ^Unary_Op_Node)
+	testing.expect_value(t, right_right.op, Token_Type.Exclamation_Point)
 }
 
 @(test)
 test_bool_op_precedence :: proc(t: ^testing.T) {
-    p := make_parser("1 + 1 || 2 * 2")
-    ast, err := parse_expression(&p)
-    
-    testing.expect_value(t, err, nil)
-    
-    or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-    testing.expect_value(t, or.op, Token_Type.Double_Pipe)
-    
-    left := expect_and_unwrap(t,or.left, ^Binary_Op_Node)
-    right := expect_and_unwrap(t,or.right, ^Binary_Op_Node)
-    
-    testing.expect_value(t, left.op, Token_Type.Plus)
-    testing.expect_value(t, right.op, Token_Type.Star)
+	p := make_parser("1 + 1 || 2 * 2")
+	ast, err := parse_expression(&p)
+
+	testing.expect_value(t, err, nil)
+
+	or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+	testing.expect_value(t, or.op, Token_Type.Double_Pipe)
+
+	left := expect_and_unwrap(t, or.left, ^Binary_Op_Node)
+	right := expect_and_unwrap(t, or.right, ^Binary_Op_Node)
+
+	testing.expect_value(t, left.op, Token_Type.Plus)
+	testing.expect_value(t, right.op, Token_Type.Star)
 }
 
 @(test)
 test_bool_op_precedence_2 :: proc(t: ^testing.T) {
-    p := make_parser("!a + !b")
-    ast, err := parse_expression(&p)
-    
-    testing.expect_value(t, err, nil)
-    
-    or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-    testing.expect_value(t, or.op, Token_Type.Plus)
-    
-    left := expect_and_unwrap(t,or.left, ^Unary_Op_Node)
-    right := expect_and_unwrap(t,or.right, ^Unary_Op_Node)
-    
-    testing.expect_value(t, left.op, Token_Type.Exclamation_Point)
-    testing.expect_value(t, right.op, Token_Type.Exclamation_Point)
+	p := make_parser("!a + !b")
+	ast, err := parse_expression(&p)
+
+	testing.expect_value(t, err, nil)
+
+	or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+	testing.expect_value(t, or.op, Token_Type.Plus)
+
+	left := expect_and_unwrap(t, or.left, ^Unary_Op_Node)
+	right := expect_and_unwrap(t, or.right, ^Unary_Op_Node)
+
+	testing.expect_value(t, left.op, Token_Type.Exclamation_Point)
+	testing.expect_value(t, right.op, Token_Type.Exclamation_Point)
 }
 
 @(test)
 test_unary_nesting_parse :: proc(t: ^testing.T) {
-    p := make_parser("!!!a")
-    ast, err := parse_expression(&p)
-    
-    testing.expect_value(t, err, nil)
-    
-    first := expect_and_unwrap(t, ast, ^Unary_Op_Node)
-    second := expect_and_unwrap(t, first.node, ^Unary_Op_Node)
-    _ = expect_and_unwrap(t, second.node, ^Unary_Op_Node)
+	p := make_parser("!!!a")
+	ast, err := parse_expression(&p)
+
+	testing.expect_value(t, err, nil)
+
+	first := expect_and_unwrap(t, ast, ^Unary_Op_Node)
+	second := expect_and_unwrap(t, first.node, ^Unary_Op_Node)
+	_ = expect_and_unwrap(t, second.node, ^Unary_Op_Node)
 }
 
 @(test)
 test_single_double_eq_tokenize :: proc(t: ^testing.T) {
-    tokens := tokenize_entire_source("= == = = =========", context.temp_allocator)
-    testing.expect_value(t, len(tokens), 10)
-    
-    testing.expect_value(t, tokens[0].type, Token_Type.Equals)
-    testing.expect_value(t, tokens[1].type, Token_Type.Double_Equals)
-    testing.expect_value(t, tokens[2].type, Token_Type.Equals)
-    testing.expect_value(t, tokens[3].type, Token_Type.Equals)
-    testing.expect_value(t, tokens[4].type, Token_Type.Double_Equals)
-    testing.expect_value(t, tokens[5].type, Token_Type.Double_Equals)
-    testing.expect_value(t, tokens[6].type, Token_Type.Double_Equals)
-    testing.expect_value(t, tokens[7].type, Token_Type.Double_Equals)
-    testing.expect_value(t, tokens[8].type, Token_Type.Equals)
+	tokens := tokenize_entire_source("= == = = =========", context.temp_allocator)
+	testing.expect_value(t, len(tokens), 10)
+
+	testing.expect_value(t, tokens[0].type, Token_Type.Equals)
+	testing.expect_value(t, tokens[1].type, Token_Type.Double_Equals)
+	testing.expect_value(t, tokens[2].type, Token_Type.Equals)
+	testing.expect_value(t, tokens[3].type, Token_Type.Equals)
+	testing.expect_value(t, tokens[4].type, Token_Type.Double_Equals)
+	testing.expect_value(t, tokens[5].type, Token_Type.Double_Equals)
+	testing.expect_value(t, tokens[6].type, Token_Type.Double_Equals)
+	testing.expect_value(t, tokens[7].type, Token_Type.Double_Equals)
+	testing.expect_value(t, tokens[8].type, Token_Type.Equals)
 }
 
 @(test)
 test_equality_evaluate :: proc(t: ^testing.T) {
-    ast, err := parse_file("var yes = 1 + 3 == 2 + 2; var no = true || false == false && true;", context.temp_allocator)
-    expect_nil(t, err)
-    
-    rt: Runtime
-    defer cleanup_runtime(&rt)
-    
-    expect_nil(t, execute_statement(&rt, ast))
-    
-    expect_variable_value(t, &rt, "yes", true)
-    expect_variable_value(t, &rt, "no", false)
+	ast, err := parse_file(
+		"var yes = 1 + 3 == 2 + 2; var no = true || false == false && true;",
+		context.temp_allocator,
+	)
+	expect_nil(t, err)
+
+	rt: Runtime
+	defer cleanup_runtime(&rt)
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	expect_variable_value(t, &rt, "yes", true)
+	expect_variable_value(t, &rt, "no", false)
 }
 
 @(test)
 test_comparison_op_eval_true :: proc(t: ^testing.T) {
-    ast, err := parse_file("var l = 2 < 3; var g = 10 > 4; var le = 4 <= 4; var ge = 5 >= 5;", context.temp_allocator)
-    expect_nil(t, err)
-    
-    rt: Runtime
-    defer cleanup_runtime(&rt)
-    
-    expect_nil(t, execute_statement(&rt, ast))
-    
-    expect_variable_value(t, &rt, "l", true)
-    expect_variable_value(t, &rt, "g", true)
-    expect_variable_value(t, &rt, "le", true)
-    expect_variable_value(t, &rt, "ge", true)
+	ast, err := parse_file(
+		"var l = 2 < 3; var g = 10 > 4; var le = 4 <= 4; var ge = 5 >= 5;",
+		context.temp_allocator,
+	)
+	expect_nil(t, err)
+
+	rt: Runtime
+	defer cleanup_runtime(&rt)
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	expect_variable_value(t, &rt, "l", true)
+	expect_variable_value(t, &rt, "g", true)
+	expect_variable_value(t, &rt, "le", true)
+	expect_variable_value(t, &rt, "ge", true)
 }
 
 @(test)
 test_comparison_op_eval_false :: proc(t: ^testing.T) {
-    ast, err := parse_file("var l = 20 < 5; var g = 12 > 14; var le = 10 <= 4; var ge = 5 >= 60;", context.temp_allocator)
-    expect_nil(t, err)
-    
-    rt: Runtime
-    defer cleanup_runtime(&rt)
-    
-    expect_nil(t, execute_statement(&rt, ast))
-    
-    expect_variable_value(t, &rt, "l", false)
-    expect_variable_value(t, &rt, "g", false)
-    expect_variable_value(t, &rt, "le", false)
-    expect_variable_value(t, &rt, "ge", false)
+	ast, err := parse_file(
+		"var l = 20 < 5; var g = 12 > 14; var le = 10 <= 4; var ge = 5 >= 60;",
+		context.temp_allocator,
+	)
+	expect_nil(t, err)
+
+	rt: Runtime
+	defer cleanup_runtime(&rt)
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	expect_variable_value(t, &rt, "l", false)
+	expect_variable_value(t, &rt, "g", false)
+	expect_variable_value(t, &rt, "le", false)
+	expect_variable_value(t, &rt, "ge", false)
 }
 
 @(test)
 test_equality_parse :: proc(t: ^testing.T) {
-    p := make_parser("1 || 2 == 3 + 4")
-    ast, err := parse_expression(&p)
-    
-    testing.expect_value(t, err, nil)
-    
-    eq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-    testing.expect_value(t, eq.op, Token_Type.Double_Equals)
+	p := make_parser("1 || 2 == 3 + 4")
+	ast, err := parse_expression(&p)
+
+	testing.expect_value(t, err, nil)
+
+	eq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+	testing.expect_value(t, eq.op, Token_Type.Double_Equals)
 }
 
 @(test)
@@ -589,7 +598,7 @@ test_if_tokenizing :: proc(t: ^testing.T) {
 	tokens := tokenize_entire_source("if {} else", context.temp_allocator)
 
 	testing.expect_value(t, len(tokens), 5)
-	
+
 	testing.expect_value(t, tokens[0].type, Token_Type.If)
 	testing.expect_value(t, tokens[1].type, Token_Type.Open_Curly)
 	testing.expect_value(t, tokens[2].type, Token_Type.Close_Curly)
@@ -598,51 +607,51 @@ test_if_tokenizing :: proc(t: ^testing.T) {
 
 @(test)
 test_if_parsing :: proc(t: ^testing.T) {
-    p := make_parser("if x > 10 { var a = 5; } else { var b = 10; }")
-    ast, err := parse_statement(&p)
-    expect_nil(t, err)
-    
-    _if := expect_and_unwrap(t,ast, ^If_Node)
-    _ = expect_and_unwrap(t, _if.body, ^Block_Node)
-    _ = expect_and_unwrap(t, _if.condition, ^Binary_Op_Node)
-    _ = expect_and_unwrap(t, _if.else_body.?, ^Block_Node)
+	p := make_parser("if x > 10 { var a = 5; } else { var b = 10; }")
+	ast, err := parse_statement(&p)
+	expect_nil(t, err)
+
+	_if := expect_and_unwrap(t, ast, ^If_Node)
+	_ = expect_and_unwrap(t, _if.body, ^Block_Node)
+	_ = expect_and_unwrap(t, _if.condition, ^Binary_Op_Node)
+	_ = expect_and_unwrap(t, _if.else_body.?, ^Block_Node)
 }
 
 @(test)
 test_if_execution :: proc(t: ^testing.T) {
-    ast, err := parse_file("var x = 0; if true { x = 1; }", context.temp_allocator)
-    expect_nil(t, err)
+	ast, err := parse_file("var x = 0; if true { x = 1; }", context.temp_allocator)
+	expect_nil(t, err)
 
-    rt: Runtime
-    defer cleanup_runtime(&rt)
-    
-    expect_nil(t, execute_statement(&rt,ast))
-    
-    expect_variable_value(t, &rt, "x", 1)
+	rt: Runtime
+	defer cleanup_runtime(&rt)
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	expect_variable_value(t, &rt, "x", 1)
 }
 
 @(test)
 test_else_execution :: proc(t: ^testing.T) {
-    ast, err := parse_file("var x = 0; if false { x = 1; } else {x = 2; }", context.temp_allocator)
-    expect_nil(t, err)
+	ast, err := parse_file("var x = 0; if false { x = 1; } else {x = 2; }", context.temp_allocator)
+	expect_nil(t, err)
 
-    rt: Runtime
-    defer cleanup_runtime(&rt)
-    
-    expect_nil(t, execute_statement(&rt,ast))
-    
-    expect_variable_value(t, &rt, "x", 2)
+	rt: Runtime
+	defer cleanup_runtime(&rt)
+
+	expect_nil(t, execute_statement(&rt, ast))
+
+	expect_variable_value(t, &rt, "x", 2)
 }
 
 @(test)
 test_if_else_chaining :: proc(t: ^testing.T) {
-    p := make_parser("if x {} else if y {} else if z {}")
-    
-    ast, err := parse_statement(&p)
-    expect_nil(t, err)
-    
-    first := expect_and_unwrap(t, ast, ^If_Node)
-    expect_not_nil(t, first.else_body)
+	p := make_parser("if x {} else if y {} else if z {}")
+
+	ast, err := parse_statement(&p)
+	expect_nil(t, err)
+
+	first := expect_and_unwrap(t, ast, ^If_Node)
+	expect_not_nil(t, first.else_body)
 }
 
 @(private = "file", require_results)
@@ -683,15 +692,25 @@ make_parser :: proc(source: string) -> Parser {
 }
 
 @(private = "file")
-expect_nil :: proc(t: ^testing.T, val: $T, loc := #caller_location, value_expr := #caller_expression(val)) {
+expect_nil :: proc(
+	t: ^testing.T,
+	val: $T,
+	loc := #caller_location,
+	value_expr := #caller_expression(val),
+) {
 	testing.expect_value(t, val, nil, loc = loc, value_expr = value_expr)
 }
 
 @(private = "file")
-expect_not_nil :: proc(t: ^testing.T, value: $T, loc := #caller_location, value_expr := #caller_expression(value)) -> bool {
+expect_not_nil :: proc(
+	t: ^testing.T,
+	value: $T,
+	loc := #caller_location,
+	value_expr := #caller_expression(value),
+) -> bool {
 	ok := value != nil
 	if !ok {
-		log.errorf("expected %v to be non-nil", value_expr, location=loc)
+		log.errorf("expected %v to be non-nil", value_expr, location = loc)
 	}
 	return ok
 }

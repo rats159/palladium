@@ -8,17 +8,17 @@ Subcommand :: enum {
 }
 
 Command_Info :: struct {
-	name: string, 
+	name:  string,
 	usage: string,
 }
 
 help_messages := [Subcommand]Command_Info {
-	.Help = {"help", "Displays this message"}
+	.Help = {"help", "Displays this message"},
 }
 
 main :: proc() {
 	subcommand := parse_args()
-	
+
 	if subcommand == .Help {
 		print_help()
 	}
