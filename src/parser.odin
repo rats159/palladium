@@ -65,6 +65,12 @@ Parser_Error :: struct {
 	message: string,
 }
 
+If_Node :: struct {
+	condition: Node,
+	body:      Node,
+	else_body: Maybe(Node),
+}
+
 Node :: union {
 	^Binary_Op_Node,
 	^Unary_Op_Node,
@@ -75,6 +81,7 @@ Node :: union {
 	^Variable_Declaration_Node,
 	^Variable_Read_Node,
 	^Variable_Write_Node,
+	^If_Node,
 }
 
 parse_file :: proc(
@@ -117,9 +124,44 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 	#partial switch parser_current(p).type {
 	case .Var:
 		return parse_variable_declaration(p)
+	case .If:
+		return parse_if_statement(p)
 	}
 
 	return parse_expression_statement(p)
+}
+
+parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .If) or_return
+	condition := parse_expression(p) or_return
+
+	_ = parser_expect(p, .Open_Curly) or_return
+	body := parse_statement_list(p, .Close_Curly) or_return
+
+	else_body: Maybe(Node)
+
+	if parser_match(p, .Else) {
+		#partial switch parser_current(p).type {
+		case .If:
+			else_body = parse_if_statement(p) or_return
+		case .Open_Curly:
+			_ = parser_expect(p, .Open_Curly) or_return
+			else_body = parse_statement_list(p, .Close_Curly) or_return
+		case:
+			return {}, Parser_Error {
+				type = .Failed_Expectation,
+				message = fmt.tprintf("Token %s does not begin an else block", parser_current(p).type),
+			}
+		}
+	}
+
+	node := make_node(p, If_Node)
+
+	node.condition = condition
+	node.body = body
+	node.else_body = else_body
+
+	return node, nil
 }
 
 parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
@@ -176,6 +218,7 @@ parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		new_node.op = op
 		left = new_node
 	}
+
    
 	return left, nil
 }
@@ -191,7 +234,7 @@ parse_or :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		new_node.op = op
 		left = new_node
 	}
-
+   
 	return left, nil
 }
 

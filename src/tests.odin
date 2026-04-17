@@ -3,6 +3,7 @@
 package palladium
 
 import "core:reflect"
+import "core:log"
 import "core:testing"
 
 @(test)
@@ -544,43 +545,104 @@ test_equality_parse :: proc(t: ^testing.T) {
 
 @(test)
 test_comparison_op_tokens :: proc(t: ^testing.T) {
-    tokens := tokenize_entire_source("><<=>===!=<==!=<<===", context.temp_allocator)
+	tokens := tokenize_entire_source("><<=>===!=<==!=<<===", context.temp_allocator)
 
-    testing.expect_value(t, len(tokens), 13)
+	testing.expect_value(t, len(tokens), 13)
 
-    types := [13]Token_Type {
-        .Greater,
-        .Less,
-        .Less_Equals,
-        .Greater_Equals,
-        .Double_Equals,
-        .Exclamation_Equals,
-        .Less_Equals,
-        .Equals,
-        .Exclamation_Equals,
-        .Less,
-        .Less_Equals,
-        .Double_Equals,
-        .EOF
-    }
+	types := [13]Token_Type {
+		.Greater,
+		.Less,
+		.Less_Equals,
+		.Greater_Equals,
+		.Double_Equals,
+		.Exclamation_Equals,
+		.Less_Equals,
+		.Equals,
+		.Exclamation_Equals,
+		.Less,
+		.Less_Equals,
+		.Double_Equals,
+		.EOF,
+	}
 
-    for tk, i in tokens {
-        testing.expect_value(t, tk.type, types[i])
-    }
+	for tk, i in tokens {
+		testing.expect_value(t, tk.type, types[i])
+	}
 }
 
 @(test)
 test_comparison_op_parsing :: proc(t: ^testing.T) {
-    p := make_parser("a < b || b < c && c >= d")
-    ast, err := parse_expression(&p)
+	p := make_parser("a < b || b < c && c >= d")
+	ast, err := parse_expression(&p)
+	expect_nil(t, err)
+
+	and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+	testing.expect_value(t, and.op, Token_Type.Double_Amp)
+
+	right := expect_and_unwrap(t, and.right, ^Binary_Op_Node)
+
+	testing.expect_value(t, right.op, Token_Type.Greater_Equals)
+}
+
+@(test)
+test_if_tokenizing :: proc(t: ^testing.T) {
+	tokens := tokenize_entire_source("if {} else", context.temp_allocator)
+
+	testing.expect_value(t, len(tokens), 5)
+	
+	testing.expect_value(t, tokens[0].type, Token_Type.If)
+	testing.expect_value(t, tokens[1].type, Token_Type.Open_Curly)
+	testing.expect_value(t, tokens[2].type, Token_Type.Close_Curly)
+	testing.expect_value(t, tokens[3].type, Token_Type.Else)
+}
+
+@(test)
+test_if_parsing :: proc(t: ^testing.T) {
+    p := make_parser("if x > 10 { var a = 5; } else { var b = 10; }")
+    ast, err := parse_statement(&p)
     expect_nil(t, err)
     
-    and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-    testing.expect_value(t, and.op, Token_Type.Double_Amp)
+    _if := expect_and_unwrap(t,ast, ^If_Node)
+    _ = expect_and_unwrap(t, _if.body, ^Block_Node)
+    _ = expect_and_unwrap(t, _if.condition, ^Binary_Op_Node)
+    _ = expect_and_unwrap(t, _if.else_body.?, ^Block_Node)
+}
+
+@(test)
+test_if_execution :: proc(t: ^testing.T) {
+    ast, err := parse_file("var x = 0; if true { x = 1; }", context.temp_allocator)
+    expect_nil(t, err)
+
+    rt: Runtime
+    defer cleanup_runtime(&rt)
     
-    right := expect_and_unwrap(t, and.right, ^Binary_Op_Node)
+    expect_nil(t, execute_statement(&rt,ast))
     
-    testing.expect_value(t, right.op, Token_Type.Greater_Equals)
+    expect_variable_value(t, &rt, "x", 1)
+}
+
+@(test)
+test_else_execution :: proc(t: ^testing.T) {
+    ast, err := parse_file("var x = 0; if false { x = 1; } else {x = 2; }", context.temp_allocator)
+    expect_nil(t, err)
+
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_statement(&rt,ast))
+    
+    expect_variable_value(t, &rt, "x", 2)
+}
+
+@(test)
+test_if_else_chaining :: proc(t: ^testing.T) {
+    p := make_parser("if x {} else if y {} else if z {}")
+    
+    ast, err := parse_statement(&p)
+    expect_nil(t, err)
+    
+    first := expect_and_unwrap(t, ast, ^If_Node)
+    expect_not_nil(t, first.else_body)
 }
 
 @(private = "file", require_results)
@@ -596,7 +658,10 @@ execute_single_expression :: proc(
 	t: ^testing.T,
 	source: string,
 	loc := #caller_location,
-) -> (Value, Maybe(Runtime_Error)) {
+) -> (
+	Value,
+	Maybe(Runtime_Error),
+) {
 	p := make_parser(source)
 	ast, err := parse_expression(&p)
 	testing.expect_value(t, err, nil, loc = loc)
@@ -618,13 +683,29 @@ make_parser :: proc(source: string) -> Parser {
 }
 
 @(private = "file")
-expect_nil :: proc(t: ^testing.T, val: $T, loc := #caller_location) {
-	testing.expect_value(t, val, nil, loc = loc)
+expect_nil :: proc(t: ^testing.T, val: $T, loc := #caller_location, value_expr := #caller_expression(val)) {
+	testing.expect_value(t, val, nil, loc = loc, value_expr = value_expr)
 }
 
 @(private = "file")
-expect_variable_value :: proc(t: ^testing.T, rt: ^Runtime, name: string, expected_value: Value, loc := #caller_location) {
+expect_not_nil :: proc(t: ^testing.T, value: $T, loc := #caller_location, value_expr := #caller_expression(value)) -> bool {
+	ok := value != nil
+	if !ok {
+		log.errorf("expected %v to be non-nil", value_expr, location=loc)
+	}
+	return ok
+}
+
+@(private = "file")
+expect_variable_value :: proc(
+	t: ^testing.T,
+	rt: ^Runtime,
+	name: string,
+	expected_value: Value,
+	loc := #caller_location,
+) {
 	val, err := read_variable(rt, name)
 	expect_nil(t, err)
 	testing.expect_value(t, val, expected_value, loc = loc)
 }
+

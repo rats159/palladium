@@ -28,6 +28,10 @@ Token_Type :: enum {
 	Greater_Equals,
 	Exclamation_Equals,
 	Identifier,
+	If,
+	Else,
+	Open_Curly,
+	Close_Curly,
 	EOF,
 }
 
@@ -35,6 +39,8 @@ keywords := #partial [Token_Type]string {
 	.Var   = "var",
 	.True  = "true",
 	.False = "false",
+	.If    = "if",
+	.Else  = "else",
 }
 
 Token :: struct {
@@ -99,6 +105,10 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Open_Paren, 1)
 	case ')':
 		emit_basic(tk, .Close_Paren, 1)
+	case '{':
+		emit_basic(tk, .Open_Curly, 1)
+	case '}':
+		emit_basic(tk, .Close_Curly, 1)
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
 	case '!':

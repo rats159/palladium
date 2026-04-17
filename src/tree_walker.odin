@@ -56,11 +56,26 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error)
 		}
 	case ^Variable_Write_Node:
 		write_variable(rt, type) or_return
+	case ^If_Node:
+	    execute_if(rt, type)
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
 
 	return nil
+}
+
+execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Maybe(Runtime_Error) {
+    cond_value := evaluate_expression(rt, stmt.condition) or_return
+    cond := unwrap_value(cond_value, bool) or_return
+
+    if cond {
+        return execute_statement(rt, stmt.body)
+    } else if else_body, exists := stmt.else_body.?; exists {
+        return execute_statement(rt, else_body)
+    }
+    
+    return nil
 }
 
 @(require_results)

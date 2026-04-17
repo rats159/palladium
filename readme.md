@@ -10,7 +10,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Runtime Errors
 - [x] Booleans
 - [x] Comparison Operators
-- [ ] If/else
+- [x] If/else
 - [ ] While loops
 - [ ] Standard Functions
 - [ ] Arrays
