@@ -71,9 +71,13 @@ If_Node :: struct {
 	else_body: Maybe(Node),
 }
 
+// TODO: labels?
+Break_Node :: struct {}
+Continue_Node :: struct {}
+
 While_Node :: struct {
-    condition: Node,
-    body: Node
+	condition: Node,
+	body:      Node,
 }
 
 Node :: union {
@@ -87,7 +91,9 @@ Node :: union {
 	^Variable_Read_Node,
 	^Variable_Write_Node,
 	^If_Node,
-	^While_Node
+	^While_Node,
+	^Continue_Node,
+	^Break_Node,
 }
 
 parse_file :: proc(
@@ -133,10 +139,18 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 	case .If:
 		return parse_if_statement(p)
 	case .While:
-	    return parse_while_statement(p)
+		return parse_while_statement(p)
+	case .Continue:
+		_ = parser_expect(p, .Continue) or_return
+		_ = parser_expect(p, .Semicolon) or_return
+		return make_node(p, Continue_Node), nil
+	case .Break:
+		_ = parser_expect(p, .Break) or_return
+		_ = parser_expect(p, .Semicolon) or_return
+		return make_node(p, Break_Node), nil
 	case .Open_Curly:
-	    _ = parser_expect(p, .Open_Curly) or_return
-	    return parse_statement_list(p, .Close_Curly)
+		_ = parser_expect(p, .Open_Curly) or_return
+		return parse_statement_list(p, .Close_Curly)
 	}
 
 	return parse_expression_statement(p)

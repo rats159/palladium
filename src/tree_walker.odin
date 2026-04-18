@@ -18,11 +18,21 @@ Runtime_Error_Type :: enum {
 	Undeclared_Variable,
 	Redeclared_Variable,
 	Type_Error,
+	Bad_Control_Flow,
 }
 
 Runtime_Error :: struct {
 	type:    Runtime_Error_Type,
 	message: string,
+}
+
+Continue :: struct {}
+Break :: struct {}
+
+Runtime_Propagation :: union {
+	Runtime_Error,
+	Continue,
+	Break,
 }
 
 cleanup_runtime :: proc(rt: ^Runtime) {
@@ -42,7 +52,7 @@ resolve_variable :: proc(rt: ^Runtime, name: string) -> ^Value {
 }
 
 @(require_results)
-read_variable :: proc(rt: ^Runtime, name: string) -> (_val: Value, _err: Maybe(Runtime_Error)) {
+read_variable :: proc(rt: ^Runtime, name: string) -> (_val: Value, _err: Runtime_Propagation) {
 	var := resolve_variable(rt, name)
 
 	if var == nil {
@@ -52,15 +62,39 @@ read_variable :: proc(rt: ^Runtime, name: string) -> (_val: Value, _err: Maybe(R
 	return var^, nil
 }
 
+execute_file :: proc(rt: ^Runtime, file: Node) -> Maybe(Runtime_Error) {
+	// no pop so we can read variables in tests
+	push_scope(rt)
+
+	for statement in file.(^Block_Node).statements {
+		res := execute_statement(rt, statement)
+		switch type in res {
+		case Runtime_Error:
+			return type
+		case Continue:
+			return Runtime_Error {
+				type = .Bad_Control_Flow,
+				message = fmt.tprint("Cannot continue at file scope"),
+			}
+		case Break:
+			return Runtime_Error {
+				type = .Bad_Control_Flow,
+				message = fmt.tprint("Cannot break at file scope"),
+			}
+		}
+	}
+
+	return nil
+}
+
 @(require_results)
-execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error) {
+execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation {
 	#partial switch type in statement {
 	case ^Variable_Declaration_Node:
 		declare_variable(rt, type) or_return
 	case ^Block_Node:
 		push_scope(rt)
-		// temporary hack to get file-scope vars in tests
-		defer if len(rt.scopes) > 1 {pop_scope(rt)}
+		defer pop_scope(rt)
 		for stmt in type.statements {
 			execute_statement(rt, stmt) or_return
 		}
@@ -70,6 +104,10 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error)
 		execute_if(rt, type) or_return
 	case ^While_Node:
 		execute_while(rt, type) or_return
+	case ^Break_Node:
+		return Break{}
+	case ^Continue_Node:
+		return Continue{}
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
@@ -87,7 +125,7 @@ pop_scope :: proc(rt: ^Runtime) {
 	delete(scope)
 }
 
-declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Maybe(Runtime_Error) {
+declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Runtime_Propagation {
 	val := evaluate_expression(rt, stmt.value) or_return
 
 	scope := &rt.scopes[len(rt.scopes) - 1]
@@ -103,20 +141,28 @@ declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Mayb
 	return nil
 }
 
-execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Maybe(Runtime_Error) {
+execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Runtime_Propagation {
 
-	for {
+	loop: for {
 		cond_node := evaluate_expression(rt, stmt.condition) or_return
 		cond := unwrap_value(cond_node, bool) or_return
 
 		if !cond do break
 
-		execute_statement(rt, stmt.body) or_return
+		prop := execute_statement(rt, stmt.body)
+		switch type in prop {
+		case Runtime_Error:
+			return type
+		case Continue:
+			continue loop
+		case Break:
+			break loop
+		}
 	}
 	return nil
 }
 
-execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Maybe(Runtime_Error) {
+execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Runtime_Propagation {
 	cond_value := evaluate_expression(rt, stmt.condition) or_return
 	cond := unwrap_value(cond_value, bool) or_return
 
@@ -130,7 +176,7 @@ execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Maybe(Runtime_Error) {
 }
 
 @(require_results)
-write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Maybe(Runtime_Error) {
+write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Runtime_Propagation {
 	var := resolve_variable(rt, node.name)
 
 	if var == nil {
@@ -145,7 +191,7 @@ write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Maybe(Runtim
 	return nil
 }
 
-evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Maybe(Runtime_Error)) {
+evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Runtime_Propagation) {
 	#partial switch type in expr {
 	case ^Binary_Op_Node:
 		return evaluate_binary_expression(rt, type)
@@ -167,7 +213,7 @@ evaluate_short_circuiting_binary_expression :: proc(
 	expr: ^Binary_Op_Node,
 ) -> (
 	_val: Value,
-	_err: Maybe(Runtime_Error),
+	_err: Runtime_Propagation,
 ) {
 	left := evaluate_expression(rt, expr.left) or_return
 	#partial switch expr.op {
@@ -203,7 +249,7 @@ evaluate_binary_expression :: proc(
 	expr: ^Binary_Op_Node,
 ) -> (
 	_val: Value,
-	_err: Maybe(Runtime_Error),
+	_err: Runtime_Propagation,
 ) {
 	if short_circuits(expr.op) {
 		return evaluate_short_circuiting_binary_expression(rt, expr)
@@ -217,7 +263,7 @@ evaluate_regular_binary_expression :: proc(
 	expr: ^Binary_Op_Node,
 ) -> (
 	_val: Value,
-	_err: Maybe(Runtime_Error),
+	_err: Runtime_Propagation,
 ) {
 	left := evaluate_expression(rt, expr.left) or_return
 	right := evaluate_expression(rt, expr.right) or_return
@@ -272,7 +318,7 @@ short_circuits :: proc(op: Token_Type) -> bool {
 	}
 }
 
-unwrap_value :: proc(val: Value, $T: typeid) -> (T, Maybe(Runtime_Error)) {
+unwrap_value :: proc(val: Value, $T: typeid) -> (T, Runtime_Propagation) {
 	unwrapped, ok := val.(T)
 
 	if ok {

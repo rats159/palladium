@@ -14,7 +14,8 @@ I don't know much about where this'll go, but here're the plans
 - [x] While loops
 - [x] Raw Blocks
 - [x] Scopes
-- [ ] Break and Continue
+- [x] Break and Continue
+- [ ] Mutating assignment operators
 - [ ] Standard Functions
 - [ ] Arrays
 - [ ] For loops

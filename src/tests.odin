@@ -159,7 +159,7 @@ test_read_variable :: proc(t: ^testing.T) {
 
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	val, val_err := read_variable(&rt, "z")
 	expect_nil(t, val_err)
@@ -175,7 +175,7 @@ test_variable_declaration :: proc(t: ^testing.T) {
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 	
 	val, read_err := read_variable(&rt, "x")
 	expect_nil(t, read_err)
@@ -250,7 +250,7 @@ test_assignment_run :: proc(t: ^testing.T) {
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	expect_variable_value(t, &rt, "x", 15)
 	expect_variable_value(t, &rt, "y", 10)
@@ -310,7 +310,7 @@ test_string_evaluation :: proc(t: ^testing.T) {
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	var, var_err := read_variable(&rt, "name")
 	testing.expect_value(t, var_err, nil)
@@ -327,7 +327,7 @@ test_undeclared_error :: proc(t: ^testing.T) {
 	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
 
-	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Undeclared_Variable)
+	testing.expect_value(t, rt_err.(Runtime_Error).type, Runtime_Error_Type.Undeclared_Variable)
 }
 
 @(test)
@@ -339,7 +339,7 @@ test_redeclared_error :: proc(t: ^testing.T) {
 	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
 
-	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Redeclared_Variable)
+	testing.expect_value(t, rt_err.(Runtime_Error).type, Runtime_Error_Type.Redeclared_Variable)
 }
 
 @(test)
@@ -351,7 +351,7 @@ test_expect_type_error :: proc(t: ^testing.T) {
 	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
 
-	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Type_Error)
+	testing.expect_value(t, rt_err.(Runtime_Error).type, Runtime_Error_Type.Type_Error)
 }
 
 @(test)
@@ -389,7 +389,7 @@ test_evaluate_booleans :: proc(t: ^testing.T) {
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
-	rt_err := execute_statement(&rt, ast)
+	rt_err := execute_file(&rt, ast)
 	expect_nil(t, rt_err)
 
 	expect_variable_value(t, &rt, "x", true)
@@ -499,7 +499,7 @@ test_equality_evaluate :: proc(t: ^testing.T) {
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	expect_variable_value(t, &rt, "yes", true)
 	expect_variable_value(t, &rt, "no", false)
@@ -516,7 +516,7 @@ test_comparison_op_eval_true :: proc(t: ^testing.T) {
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	expect_variable_value(t, &rt, "l", true)
 	expect_variable_value(t, &rt, "g", true)
@@ -535,7 +535,7 @@ test_comparison_op_eval_false :: proc(t: ^testing.T) {
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	expect_variable_value(t, &rt, "l", false)
 	expect_variable_value(t, &rt, "g", false)
@@ -627,7 +627,7 @@ test_if_execution :: proc(t: ^testing.T) {
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	expect_variable_value(t, &rt, "x", 1)
 }
@@ -640,7 +640,7 @@ test_else_execution :: proc(t: ^testing.T) {
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
-	expect_nil(t, execute_statement(&rt, ast))
+	expect_nil(t, execute_file(&rt, ast))
 
 	expect_variable_value(t, &rt, "x", 2)
 }
@@ -678,7 +678,7 @@ test_while_execution :: proc(t: ^testing.T) {
     rt: Runtime
     defer cleanup_runtime(&rt)
     
-    rt_err := execute_statement(&rt, ast)
+    rt_err := execute_file(&rt, ast)
     expect_nil(t, rt_err)
     
     expect_variable_value(t, &rt, "x", 1024)
@@ -705,7 +705,7 @@ test_blocks_eval :: proc(t: ^testing.T) {
     rt: Runtime
     defer cleanup_runtime(&rt)
     
-    expect_nil(t, execute_statement(&rt, ast))
+    expect_nil(t, execute_file(&rt, ast))
     
     expect_variable_value(t, &rt, "x", 60)
 }
@@ -719,7 +719,7 @@ test_scope_shadowing :: proc(t: ^testing.T) {
     rt: Runtime
     defer cleanup_runtime(&rt)
     
-    expect_nil(t, execute_statement(&rt, ast))
+    expect_nil(t, execute_file(&rt, ast))
     
     expect_variable_value(t, &rt, "x", 11)
 }
@@ -735,7 +735,57 @@ test_scoping :: proc(t: ^testing.T) {
     
     rt_err := execute_statement(&rt, ast)
     
-    testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Undeclared_Variable)
+    testing.expect_value(t, rt_err.(Runtime_Error).type, Runtime_Error_Type.Undeclared_Variable)
+}
+
+@(test)
+test_breaking :: proc(t: ^testing.T) {
+    ast, err := parse_file(`
+var x = 0;
+var y = 10;
+
+while y != 0 {
+    x = x + 1;
+    if x == 4 {
+        break;
+    }
+    y = y - 1;
+}`, context.temp_allocator)
+    
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_file(&rt, ast))
+    
+    expect_variable_value(t, &rt, "x", 4)
+    expect_variable_value(t, &rt, "y", 7)
+}
+
+@(test)
+test_continuing :: proc(t: ^testing.T) {
+    ast, err := parse_file(`
+var x = 0;
+var y = 10;
+
+while y != 0 {
+    y = y - 1;
+    if x == 4 {
+        continue;
+    }
+    x = x + 1;
+}`, context.temp_allocator)
+    
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_file(&rt, ast))
+    
+    expect_variable_value(t, &rt, "x", 4)
+    expect_variable_value(t, &rt, "y", 0)
 }
 
 @(private = "file", require_results)
@@ -753,7 +803,7 @@ execute_single_expression :: proc(
 	loc := #caller_location,
 ) -> (
 	Value,
-	Maybe(Runtime_Error),
+	Runtime_Propagation,
 ) {
 	p := make_parser(source)
 	ast, err := parse_expression(&p)

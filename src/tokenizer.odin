@@ -31,6 +31,8 @@ Token_Type :: enum {
 	If,
 	Else,
 	While,
+	Continue,
+	Break,
 	Open_Curly,
 	Close_Curly,
 	EOF,
@@ -42,7 +44,9 @@ keywords := #partial [Token_Type]string {
 	.False = "false",
 	.If    = "if",
 	.Else  = "else",
-	.While = "while"
+	.While = "while",
+	.Continue = "continue",
+	.Break = "break"
 }
 
 Token :: struct {
