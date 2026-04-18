@@ -71,6 +71,11 @@ If_Node :: struct {
 	else_body: Maybe(Node),
 }
 
+While_Node :: struct {
+    condition: Node,
+    body: Node
+}
+
 Node :: union {
 	^Binary_Op_Node,
 	^Unary_Op_Node,
@@ -82,6 +87,7 @@ Node :: union {
 	^Variable_Read_Node,
 	^Variable_Write_Node,
 	^If_Node,
+	^While_Node
 }
 
 parse_file :: proc(
@@ -126,6 +132,8 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 		return parse_variable_declaration(p)
 	case .If:
 		return parse_if_statement(p)
+	case .While:
+	    return parse_while_statement(p)
 	}
 
 	return parse_expression_statement(p)
@@ -157,6 +165,21 @@ parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error
 	node.condition = condition
 	node.body = body
 	node.else_body = else_body
+
+	return node, nil
+}
+
+parse_while_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .While) or_return
+	condition := parse_expression(p) or_return
+
+	_ = parser_expect(p, .Open_Curly) or_return
+	body := parse_statement_list(p, .Close_Curly) or_return
+
+	node := make_node(p, While_Node)
+
+	node.condition = condition
+	node.body = body
 
 	return node, nil
 }
@@ -207,7 +230,7 @@ parse_expression :: parse_equality
 parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 	left := parse_and(p) or_return
 
-	for op in parser_match_any(p, .Double_Equals) {
+	for op in parser_match_any(p, .Double_Equals, .Exclamation_Equals) {
 		right := parse_and(p) or_return
 		new_node := make_node(p, Binary_Op_Node)
 		new_node.left = left

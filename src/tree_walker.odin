@@ -57,12 +57,27 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error)
 	case ^Variable_Write_Node:
 		write_variable(rt, type) or_return
 	case ^If_Node:
-		execute_if(rt, type)
+		execute_if(rt, type) or_return
+	case ^While_Node:
+	    execute_while(rt, type) or_return
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
 
 	return nil
+}
+
+execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Maybe(Runtime_Error) {
+    
+    for {
+        cond_node := evaluate_expression(rt, stmt.condition) or_return
+        cond := unwrap_value(cond_node, bool) or_return
+        
+        if !cond do break
+        
+        execute_statement(rt, stmt.body) or_return
+    }
+    return nil
 }
 
 execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Maybe(Runtime_Error) {
@@ -189,6 +204,8 @@ evaluate_regular_binary_expression :: proc(
 		return left / right, nil
 	case .Double_Equals:
 		return left == right, nil
+	case .Exclamation_Equals:
+	    return left != right, nil
 	case .Less:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return

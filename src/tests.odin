@@ -652,6 +652,47 @@ test_if_else_chaining :: proc(t: ^testing.T) {
 
 	first := expect_and_unwrap(t, ast, ^If_Node)
 	expect_not_nil(t, first.else_body)
+	second := expect_and_unwrap(t, first.else_body.?, ^If_Node)
+	expect_not_nil(t, second.else_body)
+	_ = expect_and_unwrap(t, second.else_body.?, ^If_Node)
+}
+
+@(test)
+test_while_parsing :: proc(t: ^testing.T) {
+    p := make_parser("while 1 + 1 == 2 { x = 10; }")
+    
+    ast, err := parse_statement(&p)
+    expect_nil(t, err)
+    
+    while := expect_and_unwrap(t, ast, ^While_Node)
+}
+
+
+@(test)
+test_while_execution :: proc(t: ^testing.T) {    
+    ast, err := parse_file("var x = 1; var y = 10; while y != 0 { x = x * 2; y = y - 1; }", context.temp_allocator)
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    rt_err := execute_statement(&rt, ast)
+    expect_nil(t, rt_err)
+    
+    expect_variable_value(t, &rt, "x", 1024)
+    expect_variable_value(t, &rt, "y", 0)
+}
+
+@(test)
+test_not_equals_parsing :: proc(t: ^testing.T) {
+    p := make_parser("x != y")
+    
+    ast, err := parse_expression(&p)
+    expect_nil(t, err)
+    
+    neq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
+    
+    testing.expect_value(t, neq.op, Token_Type.Exclamation_Equals)
 }
 
 @(private = "file", require_results)

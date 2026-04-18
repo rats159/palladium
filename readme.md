@@ -11,7 +11,9 @@ I don't know much about where this'll go, but here're the plans
 - [x] Booleans
 - [x] Comparison Operators
 - [x] If/else
-- [ ] While loops
+- [x] While loops
+- [ ] Scopes
+- [ ] Break and Continue
 - [ ] Standard Functions
 - [ ] Arrays
 - [ ] For loops
