@@ -3,8 +3,9 @@ package palladium
 import "core:fmt"
 import "core:reflect"
 
+
 Runtime :: struct {
-	variables: map[string]Value,
+	scopes: [dynamic]map[string]Value,
 }
 
 Value :: union {
@@ -25,32 +26,41 @@ Runtime_Error :: struct {
 }
 
 cleanup_runtime :: proc(rt: ^Runtime) {
-	delete(rt.variables)
+	for scope in rt.scopes {
+		delete(scope)
+	}
+	delete(rt.scopes)
+}
+
+resolve_variable :: proc(rt: ^Runtime, name: string) -> ^Value {
+	#reverse for &scope in rt.scopes {
+		val, ok := &scope[name]
+		if ok do return val
+	}
+
+	return nil
 }
 
 @(require_results)
 read_variable :: proc(rt: ^Runtime, name: string) -> (_val: Value, _err: Maybe(Runtime_Error)) {
-	val, ok := rt.variables[name]
-	if ok do return val, nil
+	var := resolve_variable(rt, name)
 
-	return {}, Runtime_Error{type = .Undeclared_Variable, message = fmt.tprintf("Undeclared variable '%s'", name)}
+	if var == nil {
+		return {}, Runtime_Error{type = .Undeclared_Variable, message = fmt.tprintf("Undeclared variable '%s'", name)}
+	}
+
+	return var^, nil
 }
 
 @(require_results)
 execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error) {
 	#partial switch type in statement {
 	case ^Variable_Declaration_Node:
-		val := evaluate_expression(rt, type.value) or_return
-
-		if type.name in rt.variables {
-			return Runtime_Error {
-				type = .Redeclared_Variable,
-				message = fmt.tprintf("Redeclared variable '%s'", type.name),
-			}
-		}
-		rt.variables[type.name] = val
-
+		declare_variable(rt, type) or_return
 	case ^Block_Node:
+		push_scope(rt)
+		// temporary hack to get file-scope vars in tests
+		defer if len(rt.scopes) > 1 {pop_scope(rt)}
 		for stmt in type.statements {
 			execute_statement(rt, stmt) or_return
 		}
@@ -59,7 +69,7 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error)
 	case ^If_Node:
 		execute_if(rt, type) or_return
 	case ^While_Node:
-	    execute_while(rt, type) or_return
+		execute_while(rt, type) or_return
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
@@ -67,17 +77,43 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Maybe(Runtime_Error)
 	return nil
 }
 
+push_scope :: proc(rt: ^Runtime) {
+	// resize(&rt.scopes, len(rt.scopes) + 1)
+	append(&rt.scopes, map[string]Value{})
+}
+
+pop_scope :: proc(rt: ^Runtime) {
+	scope := pop(&rt.scopes)
+	delete(scope)
+}
+
+declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Maybe(Runtime_Error) {
+	val := evaluate_expression(rt, stmt.value) or_return
+
+	scope := &rt.scopes[len(rt.scopes) - 1]
+
+	if stmt.name in scope {
+		return Runtime_Error {
+			type = .Redeclared_Variable,
+			message = fmt.tprintf("Redeclared variable '%s'", stmt.name),
+		}
+	}
+	scope[stmt.name] = val
+
+	return nil
+}
+
 execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Maybe(Runtime_Error) {
-    
-    for {
-        cond_node := evaluate_expression(rt, stmt.condition) or_return
-        cond := unwrap_value(cond_node, bool) or_return
-        
-        if !cond do break
-        
-        execute_statement(rt, stmt.body) or_return
-    }
-    return nil
+
+	for {
+		cond_node := evaluate_expression(rt, stmt.condition) or_return
+		cond := unwrap_value(cond_node, bool) or_return
+
+		if !cond do break
+
+		execute_statement(rt, stmt.body) or_return
+	}
+	return nil
 }
 
 execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Maybe(Runtime_Error) {
@@ -95,9 +131,9 @@ execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Maybe(Runtime_Error) {
 
 @(require_results)
 write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Maybe(Runtime_Error) {
-	var, exists := &rt.variables[node.name]
+	var := resolve_variable(rt, node.name)
 
-	if !exists {
+	if var == nil {
 		return Runtime_Error {
 			type = .Undeclared_Variable,
 			message = fmt.tprintf("Undeclared variable '%s'", node.name),
@@ -205,7 +241,7 @@ evaluate_regular_binary_expression :: proc(
 	case .Double_Equals:
 		return left == right, nil
 	case .Exclamation_Equals:
-	    return left != right, nil
+		return left != right, nil
 	case .Less:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return

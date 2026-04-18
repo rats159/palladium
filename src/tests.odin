@@ -2,6 +2,7 @@
 
 package palladium
 
+import "core:fmt"
 import "core:log"
 import "core:reflect"
 import "core:testing"
@@ -167,8 +168,7 @@ test_read_variable :: proc(t: ^testing.T) {
 
 @(test)
 test_variable_declaration :: proc(t: ^testing.T) {
-	p := make_parser("var x = 10;")
-	ast, err := parse_statement(&p)
+	ast, err := parse_file("var x = 10;", context.temp_allocator)
 
 	testing.expect_value(t, err, nil)
 
@@ -176,7 +176,7 @@ test_variable_declaration :: proc(t: ^testing.T) {
 	defer cleanup_runtime(&rt)
 
 	expect_nil(t, execute_statement(&rt, ast))
-
+	
 	val, read_err := read_variable(&rt, "x")
 	expect_nil(t, read_err)
 	testing.expect_value(t, val, 10)
@@ -323,7 +323,8 @@ test_undeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`x = 10;`, context.temp_allocator)
 	expect_nil(t, err)
 
-	rt: Runtime
+	rt: Runtime	
+	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
 
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Undeclared_Variable)
@@ -347,6 +348,7 @@ test_expect_type_error :: proc(t: ^testing.T) {
 	expect_nil(t, err)
 
 	rt: Runtime
+	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
 
 	testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Type_Error)
@@ -708,6 +710,34 @@ test_blocks_eval :: proc(t: ^testing.T) {
     expect_variable_value(t, &rt, "x", 60)
 }
 
+@(test)
+test_scope_shadowing :: proc(t: ^testing.T) {
+    ast, err := parse_file("var x = 10; { var x = 20; x = x * 2;} x = x + 1;", context.temp_allocator)
+    
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_statement(&rt, ast))
+    
+    expect_variable_value(t, &rt, "x", 11)
+}
+
+@(test)
+test_scoping :: proc(t: ^testing.T) {
+    ast, err := parse_file("{var y = 10;} var x = y;", context.temp_allocator)
+    
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    rt_err := execute_statement(&rt, ast)
+    
+    testing.expect_value(t, rt_err.?.type, Runtime_Error_Type.Undeclared_Variable)
+}
+
 @(private = "file", require_results)
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, _ := v.(T)
@@ -730,6 +760,8 @@ execute_single_expression :: proc(
 	testing.expect_value(t, err, nil, loc = loc)
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
+	push_scope(&rt)
+	defer pop_scope(&rt)
 	return evaluate_expression(&rt, ast)
 }
 
@@ -778,7 +810,7 @@ expect_variable_value :: proc(
 	loc := #caller_location,
 ) {
 	val, err := read_variable(rt, name)
-	expect_nil(t, err)
+	expect_nil(t, err, loc = loc)
 	testing.expect_value(t, val, expected_value, loc = loc)
 }
 
