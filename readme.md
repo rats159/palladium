@@ -12,6 +12,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Comparison Operators
 - [x] If/else
 - [x] While loops
+- [x] Raw Blocks
 - [ ] Scopes
 - [ ] Break and Continue
 - [ ] Standard Functions

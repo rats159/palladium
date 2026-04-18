@@ -695,6 +695,19 @@ test_not_equals_parsing :: proc(t: ^testing.T) {
     testing.expect_value(t, neq.op, Token_Type.Exclamation_Equals)
 }
 
+@(test)
+test_blocks_eval :: proc(t: ^testing.T) {
+    ast, err := parse_file("var x = 10; {var y = 20; { x = y + x; } { x = x * 2; }}", context.temp_allocator)
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_statement(&rt, ast))
+    
+    expect_variable_value(t, &rt, "x", 60)
+}
+
 @(private = "file", require_results)
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, _ := v.(T)

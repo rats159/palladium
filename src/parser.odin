@@ -134,6 +134,9 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 		return parse_if_statement(p)
 	case .While:
 	    return parse_while_statement(p)
+	case .Open_Curly:
+	    _ = parser_expect(p, .Open_Curly) or_return
+	    return parse_statement_list(p, .Close_Curly)
 	}
 
 	return parse_expression_statement(p)
