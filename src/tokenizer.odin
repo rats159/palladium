@@ -35,18 +35,22 @@ Token_Type :: enum {
 	Break,
 	Open_Curly,
 	Close_Curly,
+	Plus_Equals,
+	Minus_Equals,
+	Star_Equals,
+	Slash_Equals,
 	EOF,
 }
 
 keywords := #partial [Token_Type]string {
-	.Var   = "var",
-	.True  = "true",
-	.False = "false",
-	.If    = "if",
-	.Else  = "else",
-	.While = "while",
+	.Var      = "var",
+	.True     = "true",
+	.False    = "false",
+	.If       = "if",
+	.Else     = "else",
+	.While    = "while",
 	.Continue = "continue",
-	.Break = "break"
+	.Break    = "break",
 }
 
 Token :: struct {
@@ -100,13 +104,29 @@ tk_scan :: proc(tk: ^Tokenizer) {
 	case '0' ..= '9':
 		emit_number(tk)
 	case '+':
-		emit_basic(tk, .Plus, 1)
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Plus_Equals, 2)
+		} else {
+			emit_basic(tk, .Plus, 1)
+		}
 	case '-':
-		emit_basic(tk, .Minus, 1)
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Minus_Equals, 2)
+		} else {
+			emit_basic(tk, .Minus, 1)
+		}
 	case '*':
-		emit_basic(tk, .Star, 1)
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Star_Equals, 2)
+		} else {
+			emit_basic(tk, .Star, 1)
+		}
 	case '/':
-		emit_basic(tk, .Slash, 1)
+		if tk_next_rune(tk) == '=' {
+			emit_basic(tk, .Slash_Equals, 2)
+		} else {
+			emit_basic(tk, .Slash, 1)
+		}
 	case '(':
 		emit_basic(tk, .Open_Paren, 1)
 	case ')':

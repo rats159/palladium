@@ -230,6 +230,41 @@ parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 		case:
 			return {}, Parser_Error{type = .Bad_Assignment_Target, message = fmt.tprintf("Cannot assign to '%s' expressions", reflect.union_variant_typeid(expr))}
 		}
+	} else if op, ok := parser_match_any(
+		p,
+		.Plus_Equals,
+		.Minus_Equals,
+		.Slash_Equals,
+		.Star_Equals,
+	); ok {
+		rhs := parse_expression(p) or_return
+
+		mutating_node := make_node(p, Binary_Op_Node)
+		mutating_node.left = expr
+		mutating_node.right = rhs
+
+		#partial switch op {
+		case .Plus_Equals:
+			mutating_node.op = .Plus
+		case .Minus_Equals:
+			mutating_node.op = .Minus
+		case .Star_Equals:
+			mutating_node.op = .Star
+		case .Slash_Equals:
+			mutating_node.op = .Slash
+		case:
+			fmt.panicf("Unhandled mutating assignment operator '%s'", op)
+		}
+
+		#partial switch type in expr {
+		case ^Variable_Read_Node:
+			node := make_node(p, Variable_Write_Node)
+			node.name = type.name
+			node.value = mutating_node
+			expr = node
+		case:
+			return {}, Parser_Error{type = .Bad_Assignment_Target, message = fmt.tprintf("Cannot assign to '%s' expressions", reflect.union_variant_typeid(expr))}
+		}
 	}
 
 	_ = parser_expect(p, .Semicolon) or_return

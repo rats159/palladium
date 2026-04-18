@@ -788,6 +788,35 @@ while y != 0 {
     expect_variable_value(t, &rt, "y", 0)
 }
 
+@(test)
+test_assignment_tk :: proc(t: ^testing.T) {
+    tokens := tokenize_entire_source("+==--=**=*/=", context.temp_allocator)
+    
+    testing.expect_value(t, len(tokens), 9)
+    testing.expect_value(t, tokens[0].type, Token_Type.Plus_Equals)
+    testing.expect_value(t, tokens[1].type, Token_Type.Equals)
+    testing.expect_value(t, tokens[2].type, Token_Type.Minus)
+    testing.expect_value(t, tokens[3].type, Token_Type.Minus_Equals)
+    testing.expect_value(t, tokens[4].type, Token_Type.Star)
+    testing.expect_value(t, tokens[5].type, Token_Type.Star_Equals)
+    testing.expect_value(t, tokens[6].type, Token_Type.Star)
+    testing.expect_value(t, tokens[7].type, Token_Type.Slash_Equals)
+}
+
+@(test)
+test_mut_assignment :: proc(t: ^testing.T) {
+    ast, err := parse_file("var x = 3; x += 3; x *= 4; x -= 3; x /= 3;", context.temp_allocator)
+    
+    expect_nil(t, err)
+    
+    rt: Runtime
+    defer cleanup_runtime(&rt)
+    
+    expect_nil(t, execute_file(&rt, ast))
+    
+    expect_variable_value(t, &rt, "x", 7)
+}
+
 @(private = "file", require_results)
 expect_and_unwrap :: proc(t: ^testing.T, v: $U, $T: typeid, loc := #caller_location) -> T {
 	variant, _ := v.(T)
@@ -861,6 +890,6 @@ expect_variable_value :: proc(
 ) {
 	val, err := read_variable(rt, name)
 	expect_nil(t, err, loc = loc)
-	testing.expect_value(t, val, expected_value, loc = loc)
+	testing.expect_value(t, val, expected_value, loc = loc, value_expr = name)
 }
 
