@@ -39,6 +39,9 @@ Token_Type :: enum {
 	Minus_Equals,
 	Star_Equals,
 	Slash_Equals,
+	Function,
+	Return,
+	Comma,
 	EOF,
 }
 
@@ -51,6 +54,8 @@ keywords := #partial [Token_Type]string {
 	.While    = "while",
 	.Continue = "continue",
 	.Break    = "break",
+	.Function = "function",
+	.Return   = "return",
 }
 
 Token :: struct {
@@ -137,6 +142,8 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Close_Curly, 1)
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
+	case ',':
+		emit_basic(tk, .Comma, 1)
 	case '!':
 		if tk_next_rune(tk) == '=' {
 			emit_basic(tk, .Exclamation_Equals, 2)

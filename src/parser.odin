@@ -6,6 +6,7 @@ import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
+import "vendor:portmidi"
 
 Parser :: struct {
 	tokenizer: Tokenizer,
@@ -20,6 +21,12 @@ Variable_Write_Node :: struct {
 Variable_Declaration_Node :: struct {
 	name:  string,
 	value: Node,
+}
+
+Function_Declaration_Node :: struct {
+	name:       string,
+	parameters: []string,
+	body:       Node,
 }
 
 String_Node :: struct {
@@ -75,9 +82,18 @@ If_Node :: struct {
 Break_Node :: struct {}
 Continue_Node :: struct {}
 
+Return_Node :: struct {
+	value: Maybe(Node),
+}
+
 While_Node :: struct {
 	condition: Node,
 	body:      Node,
+}
+
+Call_Node :: struct {
+	callee:    Node,
+	arguments: []Node,
 }
 
 Node :: union {
@@ -94,6 +110,9 @@ Node :: union {
 	^While_Node,
 	^Continue_Node,
 	^Break_Node,
+	^Function_Declaration_Node,
+	^Return_Node,
+	^Call_Node,
 }
 
 parse_file :: proc(
@@ -151,9 +170,50 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 	case .Open_Curly:
 		_ = parser_expect(p, .Open_Curly) or_return
 		return parse_statement_list(p, .Close_Curly)
+	case .Return:
+		_ = parser_expect(p, .Return) or_return
+		val: Maybe(Node)
+		if !parser_match(p, .Semicolon) {
+			val = parse_expression(p) or_return
+			_ = parser_expect(p, .Semicolon) or_return
+		}
+		node := make_node(p, Return_Node)
+		node.value = val
+		return node, nil
+	case .Function:
+		return parse_function_declaration(p)
 	}
 
 	return parse_expression_statement(p)
+}
+
+parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .Function) or_return
+	name := parser_expect(p, .Identifier) or_return
+
+	parameters := make([dynamic]string, p.allocator)
+
+	_ = parser_expect(p, .Open_Paren) or_return
+
+	for !parser_match(p, .Close_Paren) {
+		name := parser_expect(p, .Identifier) or_return
+		append(&parameters, name.value)
+		if parser_match(p, .Close_Paren) {
+			break
+		}
+		_ = parser_expect(p, .Comma) or_return
+	}
+
+	_ = parser_expect(p, .Open_Curly) or_return
+	body := parse_statement_list(p, .Close_Curly) or_return
+	// _ = parser_expect(p, .Close_Paren) or_return
+	node := make_node(p, Function_Declaration_Node)
+
+	node.body = body
+	node.name = name.value
+	node.parameters = parameters[:]
+
+	return node, nil
 }
 
 parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
@@ -380,8 +440,33 @@ parse_unary :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 
 		return node, nil
 	} else {
-		return parse_value(p)
+		return parse_call(p)
 	}
+}
+
+parse_call :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	node := parse_value(p) or_return
+
+	for parser_match(p, .Open_Paren) {
+		arguments := make([dynamic]Node, p.allocator)
+
+		for !parser_match(p, .Close_Paren) {
+			name := parse_expression(p) or_return
+			append(&arguments, name)
+			if parser_match(p, .Close_Paren) {
+				break
+			}
+			_ = parser_expect(p, .Comma) or_return
+		}
+
+		new_node := make_node(p, Call_Node)
+		new_node.arguments = arguments[:]
+		new_node.callee = node
+
+		node = new_node
+	}
+
+	return node, nil
 }
 
 // leaks on error. use an arena or be okay with leaks
@@ -458,13 +543,14 @@ parse_value :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
 		return node, nil
 	case .Open_Paren:
 		expr := parse_expression(p) or_return
-		parser_expect(p, .Close_Paren) or_return
+		_ = parser_expect(p, .Close_Paren) or_return
 		return expr, nil
 	}
 
 	return {}, Parser_Error{type = .Invalid_Value, message = fmt.aprintf("Token %s has no value", tok.type)}
 }
 
+@(require_results)
 parser_expect :: proc(p: ^Parser, type: Token_Type) -> (tok: Token, err: Maybe(Parser_Error)) {
 	tk := parser_advance(p)
 	if tk.type != type {

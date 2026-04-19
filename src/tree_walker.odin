@@ -12,6 +12,7 @@ Value :: union {
 	i64,
 	string,
 	bool,
+	Function,
 }
 
 Runtime_Error_Type :: enum {
@@ -19,6 +20,7 @@ Runtime_Error_Type :: enum {
 	Redeclared_Variable,
 	Type_Error,
 	Bad_Control_Flow,
+	Bad_Call,
 }
 
 Runtime_Error :: struct {
@@ -26,13 +28,22 @@ Runtime_Error :: struct {
 	message: string,
 }
 
+Function :: struct {
+	parameters: []string,
+	body:       Node,
+}
+
 Continue :: struct {}
 Break :: struct {}
+Return :: struct {
+	val: Maybe(Value),
+}
 
 Runtime_Propagation :: union {
 	Runtime_Error,
 	Continue,
 	Break,
+	Return,
 }
 
 cleanup_runtime :: proc(rt: ^Runtime) {
@@ -71,6 +82,11 @@ execute_file :: proc(rt: ^Runtime, file: Node) -> Maybe(Runtime_Error) {
 		switch type in res {
 		case Runtime_Error:
 			return type
+		case Return:
+			return Runtime_Error {
+				type = .Bad_Control_Flow,
+				message = fmt.tprint("Cannot return at file scope"),
+			}
 		case Continue:
 			return Runtime_Error {
 				type = .Bad_Control_Flow,
@@ -108,6 +124,15 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation 
 		return Break{}
 	case ^Continue_Node:
 		return Continue{}
+	case ^Function_Declaration_Node:
+		declare_function(rt, type) or_return
+	case ^Return_Node:
+	    ret: Return
+		if node, ok := type.value.?; ok {
+		    ret.val = evaluate_expression(rt, node) or_return
+		}
+		
+		return ret
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
@@ -123,6 +148,23 @@ push_scope :: proc(rt: ^Runtime) {
 pop_scope :: proc(rt: ^Runtime) {
 	scope := pop(&rt.scopes)
 	delete(scope)
+}
+
+declare_function :: proc(rt: ^Runtime, stmt: ^Function_Declaration_Node) -> Runtime_Propagation {
+	scope := &rt.scopes[len(rt.scopes) - 1]
+
+	if stmt.name in scope {
+		return Runtime_Error {
+			type = .Redeclared_Variable,
+			message = fmt.tprintf("Redeclared variable '%s'", stmt.name),
+		}
+	}
+	scope[stmt.name] = Function {
+		body       = stmt.body,
+		parameters = stmt.parameters,
+	}
+
+	return nil
 }
 
 declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Runtime_Propagation {
@@ -141,6 +183,20 @@ declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Runt
 	return nil
 }
 
+declare_parameter :: proc(rt: ^Runtime, name: string, value: Value) -> Runtime_Propagation {
+	scope := &rt.scopes[len(rt.scopes) - 1]
+
+	if name in scope {
+		return Runtime_Error {
+			type = .Redeclared_Variable,
+			message = fmt.tprintf("Duplicate parameter name '%s'", name),
+		}
+	}
+	scope[name] = value
+
+	return nil
+}
+
 execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Runtime_Propagation {
 
 	loop: for {
@@ -151,7 +207,7 @@ execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Runtime_Propagation {
 
 		prop := execute_statement(rt, stmt.body)
 		switch type in prop {
-		case Runtime_Error:
+		case Runtime_Error, Return:
 			return type
 		case Continue:
 			continue loop
@@ -203,9 +259,36 @@ evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Runtime_Propaga
 		return read_variable(rt, type.name)
 	case ^String_Node:
 		return type.value, nil
+	case ^Call_Node:
+		return call_function(rt, type)
 	}
 
 	fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(expr))
+}
+
+call_function :: proc(rt: ^Runtime, call: ^Call_Node) -> (_val: Value, _ret: Runtime_Propagation) {
+	callee := evaluate_expression(rt, call.callee) or_return
+	function := unwrap_value(callee, Function) or_return
+
+	if len(function.parameters) != len(call.arguments) {
+		return {}, Runtime_Error{type = .Bad_Call, message = fmt.tprintf("Bad argument count for function. Expected %d but recieved %d", len(function.parameters), len(call.arguments))}
+	}
+
+	push_scope(rt)
+	defer pop_scope(rt)
+
+	for arg, i in call.arguments {
+		name := function.parameters[i]
+		value := evaluate_expression(rt, arg) or_return
+		declare_parameter(rt, name, value) or_return
+	}
+
+	res := execute_statement(rt, function.body)
+	if ret, is_ret := res.(Return); is_ret {
+		return (ret.val.? or_else nil), nil
+	}
+
+	return {}, res
 }
 
 evaluate_short_circuiting_binary_expression :: proc(
@@ -285,9 +368,9 @@ evaluate_regular_binary_expression :: proc(
 		right := unwrap_value(right, i64) or_return
 		return left / right, nil
 	case .Double_Equals:
-		return left == right, nil
+		return values_equal(left, right)
 	case .Exclamation_Equals:
-		return left != right, nil
+		return !(values_equal(left, right) or_return), nil
 	case .Less:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
@@ -307,6 +390,35 @@ evaluate_regular_binary_expression :: proc(
 	}
 
 	fmt.panicf("Impossible binary expression operator %s", expr.op)
+}
+
+values_equal :: proc(a, b: Value) -> (bool, Runtime_Propagation) {
+	a_type := reflect.union_variant_typeid(a)
+	b_type := reflect.union_variant_typeid(b)
+
+	if a_type != b_type {
+		return false, Runtime_Error {
+			type = .Type_Error,
+			message = fmt.tprintf(
+				"Expected both sides of equality to be the same type, but but recieved %s and %s",
+				a_type,
+				b_type,
+			),
+		}
+	}
+
+	switch type in a {
+	case i64:
+		return a.(i64) == b.(i64), nil
+	case bool:
+		return a.(bool) == b.(bool), nil
+	case string:
+		return a.(string) == b.(string), nil
+	case Function:
+		return a.(Function).body == b.(Function).body, nil
+	}
+
+	fmt.panicf("Impossible value type %s", a_type)
 }
 
 short_circuits :: proc(op: Token_Type) -> bool {
