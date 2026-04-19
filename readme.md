@@ -16,7 +16,8 @@ I don't know much about where this'll go, but here're the plans
 - [x] Scopes
 - [x] Break and Continue
 - [x] Mutating assignment operators
-- [ ] Standard Functions
+- [x] Standard Functions
+- [ ] Static Typing
 - [ ] Arrays
 - [ ] For loops
 - [ ] Foreign Functions
