@@ -21,6 +21,7 @@ I don't know much about where this'll go, but here're the plans
 - [ ] Arrays
 - [ ] For loops
 - [ ] Foreign Functions
+
 should be enough to be somewhat usable. 
 
 ---
