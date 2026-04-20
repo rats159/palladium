@@ -18,6 +18,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Mutating assignment operators
 - [x] Standard Functions
 - [ ] Static Typing
+- [ ] Type Inference
 - [ ] Arrays
 - [ ] For loops
 - [ ] Foreign Functions

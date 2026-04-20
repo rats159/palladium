@@ -42,6 +42,7 @@ Token_Type :: enum {
 	Function,
 	Return,
 	Comma,
+	Colon,
 	EOF,
 }
 
@@ -142,6 +143,8 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Close_Curly, 1)
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
+	case ':':
+		emit_basic(tk, .Colon, 1)
 	case ',':
 		emit_basic(tk, .Comma, 1)
 	case '!':

@@ -2,6 +2,9 @@ package palladium
 
 import "core:fmt"
 import "core:reflect"
+import "vendor:portmidi"
+
+CHECKED_RUNTIME :: #config(CHECKED_RUNTIME, false)
 
 
 Runtime :: struct {
@@ -29,7 +32,7 @@ Runtime_Error :: struct {
 }
 
 Function :: struct {
-	parameters: []string,
+	parameters: []Parameter_Node,
 	body:       Node,
 }
 
@@ -127,11 +130,11 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation 
 	case ^Function_Declaration_Node:
 		declare_function(rt, type) or_return
 	case ^Return_Node:
-	    ret: Return
+		ret: Return
 		if node, ok := type.value.?; ok {
-		    ret.val = evaluate_expression(rt, node) or_return
+			ret.val = evaluate_expression(rt, node) or_return
 		}
-		
+
 		return ret
 	case:
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
@@ -280,7 +283,7 @@ call_function :: proc(rt: ^Runtime, call: ^Call_Node) -> (_val: Value, _ret: Run
 	for arg, i in call.arguments {
 		name := function.parameters[i]
 		value := evaluate_expression(rt, arg) or_return
-		declare_parameter(rt, name, value) or_return
+		declare_parameter(rt, name.name, value) or_return
 	}
 
 	res := execute_statement(rt, function.body)
@@ -430,13 +433,23 @@ short_circuits :: proc(op: Token_Type) -> bool {
 	}
 }
 
-unwrap_value :: proc(val: Value, $T: typeid) -> (T, Runtime_Propagation) {
-	unwrapped, ok := val.(T)
 
-	if ok {
-		return unwrapped, nil
+when CHECKED_RUNTIME {
+	unwrap_value :: proc(val: Value, $T: typeid) -> (T, Runtime_Propagation) {
+		unwrapped, ok := val.(T)
+
+		if ok {
+			return unwrapped, nil
+		}
+
+		return {}, Runtime_Error{type = .Type_Error, message = fmt.tprintf("Expected a %s but recieved a %s", reflect.union_variant_typeid(val), typeid_of(T))}
 	}
 
-	return {}, Runtime_Error{type = .Type_Error, message = fmt.tprintf("Expected a %s but recieved a %s", reflect.union_variant_typeid(val), typeid_of(T))}
+} else {
+	unwrap_value :: proc(val: Value, $T: typeid, loc := #caller_location) -> (T, Runtime_Propagation) {
+		unwrapped, ok := val.(T)
+		assert(ok, loc=loc)
+		return unwrapped, nil
+	}
 }
 

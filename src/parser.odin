@@ -6,7 +6,6 @@ import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
-import "vendor:portmidi"
 
 Parser :: struct {
 	tokenizer: Tokenizer,
@@ -20,13 +19,20 @@ Variable_Write_Node :: struct {
 
 Variable_Declaration_Node :: struct {
 	name:  string,
+	type:  Node,
 	value: Node,
 }
 
+Parameter_Node :: struct {
+	name: string,
+	type: Node,
+}
+
 Function_Declaration_Node :: struct {
-	name:       string,
-	parameters: []string,
-	body:       Node,
+	name:        string, 
+	parameters:  []Parameter_Node,
+	body:        Node,
+	return_type: Node,
 }
 
 String_Node :: struct {
@@ -191,18 +197,23 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 	_ = parser_expect(p, .Function) or_return
 	name := parser_expect(p, .Identifier) or_return
 
-	parameters := make([dynamic]string, p.allocator)
+	parameters := make([dynamic]Parameter_Node, p.allocator)
 
 	_ = parser_expect(p, .Open_Paren) or_return
 
 	for !parser_match(p, .Close_Paren) {
 		name := parser_expect(p, .Identifier) or_return
-		append(&parameters, name.value)
+		_ = parser_expect(p, .Colon) or_return
+		type := parse_type(p) or_return
+		append(&parameters, Parameter_Node{name.value, type})
 		if parser_match(p, .Close_Paren) {
 			break
 		}
 		_ = parser_expect(p, .Comma) or_return
 	}
+	
+	_ = parser_expect(p, .Colon) or_return
+	type := parse_type(p) or_return
 
 	_ = parser_expect(p, .Open_Curly) or_return
 	body := parse_statement_list(p, .Close_Curly) or_return
@@ -212,6 +223,7 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 	node.body = body
 	node.name = name.value
 	node.parameters = parameters[:]
+	node.return_type = type
 
 	return node, nil
 }
@@ -264,15 +276,25 @@ parse_while_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Er
 parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 	_ = parser_expect(p, .Var) or_return
 	name := parser_expect(p, .Identifier) or_return
+
+	_ = parser_expect(p, .Colon) or_return
+	type := parse_type(p) or_return
+
 	_ = parser_expect(p, .Equals) or_return
 	value := parse_expression(p) or_return
 	_ = parser_expect(p, .Semicolon) or_return
 
 	node := make_node(p, Variable_Declaration_Node)
 	node.name = name.value
+	node.type = type
 	node.value = value
 
 	return node, nil
+}
+
+parse_type :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	name := parser_expect(p, .Identifier) or_return
+	return nil, nil
 }
 
 parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
