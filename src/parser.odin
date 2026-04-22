@@ -17,6 +17,10 @@ Variable_Write_Node :: struct {
 	value: Node,
 }
 
+Named_Type_Node :: struct {
+	name: string
+}
+
 Variable_Declaration_Node :: struct {
 	name:  string,
 	type:  Node,
@@ -119,6 +123,7 @@ Node :: union {
 	^Function_Declaration_Node,
 	^Return_Node,
 	^Call_Node,
+	^Named_Type_Node
 }
 
 parse_file :: proc(
@@ -294,7 +299,9 @@ parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 
 parse_type :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 	name := parser_expect(p, .Identifier) or_return
-	return nil, nil
+	node := make_node(p, Named_Type_Node)
+	node.name = name.value
+	return node, nil
 }
 
 parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {

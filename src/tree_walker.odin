@@ -2,7 +2,6 @@ package palladium
 
 import "core:fmt"
 import "core:reflect"
-import "vendor:portmidi"
 
 CHECKED_RUNTIME :: #config(CHECKED_RUNTIME, false)
 

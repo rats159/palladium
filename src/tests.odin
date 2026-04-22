@@ -158,6 +158,8 @@ test_read_variable :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, err, nil)
 
+	expect_fine_types(t, ast)
+	
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 	expect_nil(t, execute_file(&rt, ast))
@@ -173,6 +175,8 @@ test_variable_declaration :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, err, nil)
 
+	expect_fine_types(t, ast)
+	
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
@@ -219,6 +223,8 @@ test_multi_statement :: proc(t: ^testing.T) {
 	ast, err := parse_file("1 + 2; 3 + 4; var x: int = 10 - 3;", context.temp_allocator)
 	testing.expect_value(t, err, nil)
 
+	expect_fine_types(t, ast)
+	
 	body := expect_and_unwrap(t, ast, ^Block_Node)
 	testing.expect_value(t, len(body.statements), 3)
 
@@ -248,6 +254,8 @@ test_assignment_run :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, err, nil)
 
+	expect_fine_types(t, ast)
+	
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
@@ -308,6 +316,8 @@ test_string_evaluation :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, err, nil)
 
+	expect_fine_types(t, ast)
+	
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 
@@ -336,6 +346,8 @@ test_redeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x: int = 10; var x: int = 20;`, context.temp_allocator)
 	expect_nil(t, err)
 
+	expect_fine_types(t, ast)
+	
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 	rt_err := execute_statement(&rt, ast)
@@ -351,7 +363,8 @@ test_expect_type_error :: proc(t: ^testing.T) {
 	checker_errors := check_program(ast, context.temp_allocator)
 	
 	testing.expect_value(t, len(checker_errors), 2)
-	fmt.println(checker_errors)
+	testing.expect_value(t, checker_errors[0].type, Checker_Error_Type.Bad_Operator) // string - string is disallowed
+	testing.expect_value(t, checker_errors[1].type, Checker_Error_Type.Bad_Conversion) // int = <invalid> is disallowed
 }
 
 @(test)
@@ -386,6 +399,8 @@ test_evaluate_booleans :: proc(t: ^testing.T) {
 
 	expect_nil(t, err)
 
+	expect_fine_types(t, ast)
+	
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
@@ -496,6 +511,8 @@ test_equality_evaluate :: proc(t: ^testing.T) {
 	)
 	expect_nil(t, err)
 
+	expect_fine_types(t, ast)
+
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
@@ -512,6 +529,8 @@ test_comparison_op_eval_true :: proc(t: ^testing.T) {
 		context.temp_allocator,
 	)
 	expect_nil(t, err)
+
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -531,6 +550,8 @@ test_comparison_op_eval_false :: proc(t: ^testing.T) {
 		context.temp_allocator,
 	)
 	expect_nil(t, err)
+
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -612,6 +633,8 @@ test_if_parsing :: proc(t: ^testing.T) {
 	p := make_parser("if x > 10 { var a: int = 5; } else { var b: int = 10; }")
 	ast, err := parse_statement(&p)
 	expect_nil(t, err)
+	
+	expect_fine_types(t, ast)
 
 	_if := expect_and_unwrap(t, ast, ^If_Node)
 	_ = expect_and_unwrap(t, _if.body, ^Block_Node)
@@ -623,6 +646,8 @@ test_if_parsing :: proc(t: ^testing.T) {
 test_if_execution :: proc(t: ^testing.T) {
 	ast, err := parse_file("var x: int = 0; if true { x = 1; }", context.temp_allocator)
 	expect_nil(t, err)
+	
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -636,6 +661,8 @@ test_if_execution :: proc(t: ^testing.T) {
 test_else_execution :: proc(t: ^testing.T) {
 	ast, err := parse_file("var x: int = 0; if false { x = 1; } else {x = 2; }", context.temp_allocator)
 	expect_nil(t, err)
+
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -678,6 +705,8 @@ test_while_execution :: proc(t: ^testing.T) {
 	)
 	expect_nil(t, err)
 
+	expect_fine_types(t, ast)
+
 	rt: Runtime
 	defer cleanup_runtime(&rt)
 
@@ -707,6 +736,8 @@ test_blocks_eval :: proc(t: ^testing.T) {
 		context.temp_allocator,
 	)
 	expect_nil(t, err)
+	
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -724,6 +755,9 @@ test_scope_shadowing :: proc(t: ^testing.T) {
 	)
 
 	expect_nil(t, err)
+	
+	expect_fine_types(t, ast)
+
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -738,6 +772,8 @@ test_scoping :: proc(t: ^testing.T) {
 	ast, err := parse_file("{var y: int = 10;} var x: int = y;", context.temp_allocator)
 
 	expect_nil(t, err)
+
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -765,6 +801,8 @@ while y != 0 {
 	)
 
 	expect_nil(t, err)
+	
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -793,6 +831,8 @@ while y != 0 {
 	)
 
 	expect_nil(t, err)
+
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -823,6 +863,8 @@ test_mut_assignment :: proc(t: ^testing.T) {
 	ast, err := parse_file("var x: int = 3; x += 3; x *= 4; x -= 3; x /= 3;", context.temp_allocator)
 
 	expect_nil(t, err)
+
+	expect_fine_types(t, ast)
 
 	rt: Runtime
 	defer cleanup_runtime(&rt)
@@ -885,6 +927,8 @@ test_function_definition :: proc(t: ^testing.T) {
     ast, err := parse_file("function add(a: int, b: int): int { return a + b;}", context.temp_allocator)
     expect_nil(t, err)
     
+   	expect_fine_types(t, ast)
+
     rt: Runtime
     defer cleanup_runtime(&rt)
     
@@ -901,6 +945,8 @@ test_function_call :: proc(t: ^testing.T) {
     ast, err := parse_file("function add(a: int, b: int): int { return a + b;} var x: int = add(2,3);", context.temp_allocator)
     expect_nil(t, err)
     
+   	expect_fine_types(t, ast)
+
     rt: Runtime
     defer cleanup_runtime(&rt)
     
@@ -931,6 +977,16 @@ execute_single_expression :: proc(
 	p := make_parser(source)
 	ast, err := parse_expression(&p)
 	testing.expect_value(t, err, nil, loc = loc)
+	
+	checker := make_checker(context.temp_allocator)
+	check_expression(&checker, ast)
+	if len(checker.errors) != 0 {
+		log.errorf("expected 0 type errors, got %v:", len(checker.errors), location=loc)
+		for error in checker.errors {
+			log.error("    ", error)
+		}
+	}
+	
 	rt := Runtime{}
 	defer cleanup_runtime(&rt)
 	push_scope(&rt)
@@ -998,4 +1054,15 @@ expect_values_equal :: proc(t: ^testing.T, value, expected: Value, loc := #calle
 		log.errorf("expected %v to be %v, got %v", value_expr, expected, value, location=loc)
 	}
 	return ok
+}
+
+@(private = "file")
+expect_fine_types :: proc(t: ^testing.T, node: Node, loc := #caller_location) {
+	errs := check_program(node, context.temp_allocator)
+	if len(errs) != 0 {
+		log.errorf("expected 0 type errors, got %v:", len(errs), location=loc)
+		for error in errs {
+			fmt.eprintln("    ", error)
+		}
+	}
 }
