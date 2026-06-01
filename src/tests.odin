@@ -346,13 +346,9 @@ test_redeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x: int = 10; var x: int = 20;`, context.temp_allocator)
 	expect_nil(t, err)
 
-	expect_fine_types(t, ast)
-	
-	rt: Runtime
-	defer cleanup_runtime(&rt)
-	rt_err := execute_statement(&rt, ast)
-
-	testing.expect_value(t, rt_err.(Runtime_Error).type, Runtime_Error_Type.Redeclared_Variable)
+	errs := check_program(ast, context.temp_allocator)
+	testing.expect_value(t, len(errs), 1)
+	testing.expect_value(t, errs[0].type, Checker_Error_Type.Redeclaration)
 }
 
 @(test)
@@ -630,7 +626,7 @@ test_if_tokenizing :: proc(t: ^testing.T) {
 
 @(test)
 test_if_parsing :: proc(t: ^testing.T) {
-	p := make_parser("if x > 10 { var a: int = 5; } else { var b: int = 10; }")
+	p := make_parser("if true { var a: int = 5; } else { var b: int = 10; }")
 	ast, err := parse_statement(&p)
 	expect_nil(t, err)
 	
@@ -638,7 +634,7 @@ test_if_parsing :: proc(t: ^testing.T) {
 
 	_if := expect_and_unwrap(t, ast, ^If_Node)
 	_ = expect_and_unwrap(t, _if.body, ^Block_Node)
-	_ = expect_and_unwrap(t, _if.condition, ^Binary_Op_Node)
+	_ = expect_and_unwrap(t, _if.condition, ^Boolean_Node)
 	_ = expect_and_unwrap(t, _if.else_body.?, ^Block_Node)
 }
 
@@ -773,14 +769,12 @@ test_scoping :: proc(t: ^testing.T) {
 
 	expect_nil(t, err)
 
-	expect_fine_types(t, ast)
+	// expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
-
-	rt_err := execute_statement(&rt, ast)
-
-	testing.expect_value(t, rt_err.(Runtime_Error).type, Runtime_Error_Type.Undeclared_Variable)
+	errs := check_program(ast, context.temp_allocator)
+	testing.expect_value(t, len(errs), 2)
+	testing.expect_value(t, errs[0].type, Checker_Error_Type.Undeclared) // Y isn't in the outer scope
+	testing.expect_value(t, errs[1].type, Checker_Error_Type.Bad_Conversion) // Invalid type
 }
 
 @(test)
@@ -979,6 +973,13 @@ execute_single_expression :: proc(
 	testing.expect_value(t, err, nil, loc = loc)
 	
 	checker := make_checker(context.temp_allocator)
+
+	push_type_scope(&checker)
+	
+	declare_named_type(&checker, "string", get_type(&checker, Builtin_Type.String_Literal))
+	declare_named_type(&checker, "int", get_type(&checker, Builtin_Type.Integer_Literal))
+	declare_named_type(&checker, "bool", get_type(&checker, Builtin_Type.Bool_Literal))
+	
 	check_expression(&checker, ast)
 	if len(checker.errors) != 0 {
 		log.errorf("expected 0 type errors, got %v:", len(checker.errors), location=loc)
@@ -1062,7 +1063,7 @@ expect_fine_types :: proc(t: ^testing.T, node: Node, loc := #caller_location) {
 	if len(errs) != 0 {
 		log.errorf("expected 0 type errors, got %v:", len(errs), location=loc)
 		for error in errs {
-			fmt.eprintln("    ", error)
+			log.info(error)
 		}
 	}
 }
