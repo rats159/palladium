@@ -17,11 +17,12 @@ I don't know much about where this'll go, but here're the plans
 - [x] Break and Continue
 - [x] Mutating assignment operators
 - [x] Standard Functions
-- [ ] Static Typing
+- [x] Static Typing
 - [ ] Type Inference
 - [ ] Arrays
 - [ ] For loops
 - [ ] Foreign Functions
+- [ ] Imports
 
 should be enough to be somewhat usable. 
 
