@@ -154,7 +154,7 @@ test_identifier_tokenizing :: proc(t: ^testing.T) {
 
 @(test)
 test_read_variable :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x: int = 10; var y: int = x + 10; var z: int = y * y;", context.temp_allocator)
+	ast, err := parse_file("var x = 10; var y = x + 10; var z = y * y;", context.temp_allocator)
 
 	testing.expect_value(t, err, nil)
 
@@ -171,7 +171,7 @@ test_read_variable :: proc(t: ^testing.T) {
 
 @(test)
 test_variable_declaration :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x: int = 10;", context.temp_allocator)
+	ast, err := parse_file("var x = 10;", context.temp_allocator)
 
 	testing.expect_value(t, err, nil)
 
@@ -202,7 +202,7 @@ test_variable_read_parsing :: proc(t: ^testing.T) {
 
 @(test)
 test_variable_declaration_parse :: proc(t: ^testing.T) {
-	p := make_parser("var xyz1: int = 10 + 20;")
+	p := make_parser("var xyz1 = 10 + 20;")
 	ast, err := parse_statement(&p)
 	testing.expect_value(t, err, nil)
 
@@ -220,7 +220,7 @@ test_variable_declaration_parse :: proc(t: ^testing.T) {
 
 @(test)
 test_multi_statement :: proc(t: ^testing.T) {
-	ast, err := parse_file("1 + 2; 3 + 4; var x: int = 10 - 3;", context.temp_allocator)
+	ast, err := parse_file("1 + 2; 3 + 4; var x = 10 - 3;", context.temp_allocator)
 	testing.expect_value(t, err, nil)
 
 	expect_fine_types(t, ast)
@@ -248,7 +248,7 @@ test_assignment_parse :: proc(t: ^testing.T) {
 @(test)
 test_assignment_run :: proc(t: ^testing.T) {
 	ast, err := parse_file(
-		"var x: int = 10; var y: int = 20; y = x; x = 30; var z: int = y + x; x = 15;",
+		"var x = 10; var y = 20; y = x; x = 30; var z = y + x; x = 15;",
 		context.temp_allocator,
 	)
 
@@ -343,7 +343,7 @@ test_undeclared_error :: proc(t: ^testing.T) {
 
 @(test)
 test_redeclared_error :: proc(t: ^testing.T) {
-	ast, err := parse_file(`var x: int = 10; var x: int = 20;`, context.temp_allocator)
+	ast, err := parse_file(`var x = 10; var x = 20;`, context.temp_allocator)
 	expect_nil(t, err)
 
 	errs := check_program(ast, context.temp_allocator)
@@ -353,7 +353,7 @@ test_redeclared_error :: proc(t: ^testing.T) {
 
 @(test)
 test_expect_type_error :: proc(t: ^testing.T) {
-	ast, err := parse_file(`var x: int = "abc" - "def";`, context.temp_allocator)
+	ast, err := parse_file(`var x = "abc" - "def";`, context.temp_allocator)
 	expect_nil(t, err)
 
 	checker_errors := check_program(ast, context.temp_allocator)
@@ -626,7 +626,7 @@ test_if_tokenizing :: proc(t: ^testing.T) {
 
 @(test)
 test_if_parsing :: proc(t: ^testing.T) {
-	p := make_parser("if true { var a: int = 5; } else { var b: int = 10; }")
+	p := make_parser("if true { var a = 5; } else { var b = 10; }")
 	ast, err := parse_statement(&p)
 	expect_nil(t, err)
 	
@@ -640,7 +640,7 @@ test_if_parsing :: proc(t: ^testing.T) {
 
 @(test)
 test_if_execution :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x: int = 0; if true { x = 1; }", context.temp_allocator)
+	ast, err := parse_file("var x = 0; if true { x = 1; }", context.temp_allocator)
 	expect_nil(t, err)
 	
 	expect_fine_types(t, ast)
@@ -655,7 +655,7 @@ test_if_execution :: proc(t: ^testing.T) {
 
 @(test)
 test_else_execution :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x: int = 0; if false { x = 1; } else {x = 2; }", context.temp_allocator)
+	ast, err := parse_file("var x = 0; if false { x = 1; } else {x = 2; }", context.temp_allocator)
 	expect_nil(t, err)
 
 	expect_fine_types(t, ast)
@@ -696,7 +696,7 @@ test_while_parsing :: proc(t: ^testing.T) {
 @(test)
 test_while_execution :: proc(t: ^testing.T) {
 	ast, err := parse_file(
-		"var x : int = 1; var y: int = 10; while y != 0 { x = x * 2; y = y - 1; }",
+		"var x  = 1; var y = 10; while y != 0 { x = x * 2; y = y - 1; }",
 		context.temp_allocator,
 	)
 	expect_nil(t, err)
@@ -728,7 +728,7 @@ test_not_equals_parsing :: proc(t: ^testing.T) {
 @(test)
 test_blocks_eval :: proc(t: ^testing.T) {
 	ast, err := parse_file(
-		"var x: int = 10; {var y: int  = 20; { x = y + x; } { x = x * 2; }}",
+		"var x = 10; {var y  = 20; { x = y + x; } { x = x * 2; }}",
 		context.temp_allocator,
 	)
 	expect_nil(t, err)
@@ -746,7 +746,7 @@ test_blocks_eval :: proc(t: ^testing.T) {
 @(test)
 test_scope_shadowing :: proc(t: ^testing.T) {
 	ast, err := parse_file(
-		"var x: int = 10; { var x: int = 20; x = x * 2;} x = x + 1;",
+		"var x = 10; { var x = 20; x = x * 2;} x = x + 1;",
 		context.temp_allocator,
 	)
 
@@ -765,7 +765,7 @@ test_scope_shadowing :: proc(t: ^testing.T) {
 
 @(test)
 test_scoping :: proc(t: ^testing.T) {
-	ast, err := parse_file("{var y: int = 10;} var x: int = y;", context.temp_allocator)
+	ast, err := parse_file("{var y = 10;} var x = y;", context.temp_allocator)
 
 	expect_nil(t, err)
 
@@ -773,6 +773,7 @@ test_scoping :: proc(t: ^testing.T) {
 
 	errs := check_program(ast, context.temp_allocator)
 	testing.expect_value(t, len(errs), 2)
+	log.info(errs)
 	testing.expect_value(t, errs[0].type, Checker_Error_Type.Undeclared) // Y isn't in the outer scope
 	testing.expect_value(t, errs[1].type, Checker_Error_Type.Bad_Conversion) // Invalid type
 }
@@ -781,8 +782,8 @@ test_scoping :: proc(t: ^testing.T) {
 test_breaking :: proc(t: ^testing.T) {
 	ast, err := parse_file(
 		`
-var x: int = 0;
-var y: int = 10;
+var x = 0;
+var y = 10;
 
 while y != 0 {
     x = x + 1;
@@ -811,8 +812,8 @@ while y != 0 {
 test_continuing :: proc(t: ^testing.T) {
 	ast, err := parse_file(
 		`
-var x: int = 0;
-var y: int = 10;
+var x = 0;
+var y = 10;
 
 while y != 0 {
     y = y - 1;
@@ -854,7 +855,7 @@ test_assignment_tk :: proc(t: ^testing.T) {
 
 @(test)
 test_mut_assignment :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x: int = 3; x += 3; x *= 4; x -= 3; x /= 3;", context.temp_allocator)
+	ast, err := parse_file("var x = 3; x += 3; x *= 4; x -= 3; x /= 3;", context.temp_allocator)
 
 	expect_nil(t, err)
 
@@ -936,7 +937,7 @@ test_function_definition :: proc(t: ^testing.T) {
 
 @(test)
 test_function_call :: proc(t: ^testing.T) {
-    ast, err := parse_file("function add(a: int, b: int): int { return a + b;} var x: int = add(2,3);", context.temp_allocator)
+    ast, err := parse_file("function add(a: int, b: int): int { return a + b;} var x = add(2,3);", context.temp_allocator)
     expect_nil(t, err)
     
    	expect_fine_types(t, ast)
@@ -949,6 +950,32 @@ test_function_call :: proc(t: ^testing.T) {
     x, read_err := read_variable(&rt, "x")
     expect_nil(t, read_err)
     expect_values_equal(t, x, 5)
+}
+
+@(test)
+test_no_inference :: proc(t: ^testing.T) {
+	ast, err := parse_file("var x: int = 1; var y: int = 2; var z: int = x + y;", context.temp_allocator)
+	expect_nil(t, err)
+	expect_fine_types(t, ast)
+}
+
+@(test)
+test_inference :: proc(t: ^testing.T) {
+	ast, err := parse_file("var x = 1; var y = 2; var z = x + y;", context.temp_allocator)
+	expect_nil(t, err)
+	expect_fine_types(t, ast)
+}
+
+@(test)
+test_type_disagreement :: proc(t: ^testing.T) {
+	ast, err := parse_file("var x: int = \"hello\"; var y = 2; var z = x + y;", context.temp_allocator)
+	expect_nil(t, err)
+
+	errs := check_program(ast, context.temp_allocator)
+	// x is still treated as int, despite assignment failure
+	//  so the rest of the program is fine
+	testing.expect_value(t, len(errs), 1)
+	testing.expect_value(t, errs[0].type, Checker_Error_Type.Bad_Conversion) // string -> int
 }
 
 @(private = "file", require_results)

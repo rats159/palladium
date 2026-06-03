@@ -23,7 +23,7 @@ Named_Type_Node :: struct {
 
 Variable_Declaration_Node :: struct {
 	name:  string,
-	type:  Node,
+	type:  Maybe(Node),
 	value: Node,
 }
 
@@ -282,8 +282,10 @@ parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 	_ = parser_expect(p, .Var) or_return
 	name := parser_expect(p, .Identifier) or_return
 
-	_ = parser_expect(p, .Colon) or_return
-	type := parse_type(p) or_return
+	type: Maybe(Node)
+	if parser_match(p, .Colon) {
+		type = parse_type(p) or_return
+	}
 
 	_ = parser_expect(p, .Equals) or_return
 	value := parse_expression(p) or_return

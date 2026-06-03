@@ -1,5 +1,6 @@
 package palladium
 
+import "core:log"
 import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
@@ -215,8 +216,13 @@ check_function_declaration :: proc(checker: ^Checker, node: ^Function_Declaratio
 
 check_declaration :: proc(checker: ^Checker, node: ^Variable_Declaration_Node) {
 	expr_type := check_expression(checker, node.value)
-	declared_type := evaluate_type(checker, node.type)
-
+	declared_type : ^Type 
+	if t, not_inferred := node.type.?; not_inferred {
+		declared_type = evaluate_type(checker, t)
+	} else {
+		declared_type = expr_type
+	}
+	
 	declare_variable_type(checker, node.name, declared_type)
 
 	if !is_convertible_from_to(expr_type, declared_type) {
@@ -465,6 +471,9 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
 // Strict equivalence, no implicit conversions
 types_are_equivalent :: proc(a_ptr, b_ptr: ^Type, loc := #caller_location) -> bool {
 	if a_ptr == b_ptr {
+		if a_ptr == &invalid_type {
+			return false
+		}
 		return true
 	}
 
