@@ -83,7 +83,9 @@ hash_type :: proc(t: Type, loc := #caller_location) -> Type_Hash {
 		}
 
 		return Type_Hash(running_hash)
-
+	case Array_Type:
+	    // TODO: is this good enough?
+	    return Type_Hash(hash.fnv64a(bytesof(type.elem_type),u64(type.length)))
 	}
 	panic("Impossible type", loc = loc)
 }

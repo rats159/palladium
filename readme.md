@@ -20,9 +20,11 @@ I don't know much about where this'll go, but here're the plans
 - [x] Static Typing
 - [x] Type Inference
 - [ ] Arrays
+- [ ] Bytecode
 - [ ] For loops
 - [ ] Foreign Functions
 - [ ] Imports
+- [ ] CLI (`palladium run test.pd`, etc)
 
 should be enough to be somewhat usable. 
 

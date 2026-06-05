@@ -35,6 +35,8 @@ Token_Type :: enum {
 	Break,
 	Open_Curly,
 	Close_Curly,
+	Open_Bracket,
+	Close_Bracket,
 	Plus_Equals,
 	Minus_Equals,
 	Star_Equals,
@@ -141,6 +143,10 @@ tk_scan :: proc(tk: ^Tokenizer) {
 		emit_basic(tk, .Open_Curly, 1)
 	case '}':
 		emit_basic(tk, .Close_Curly, 1)
+	case '[':
+	    emit_basic(tk, .Open_Bracket, 1)
+	case ']':
+	    emit_basic(tk, .Close_Bracket, 1)
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
 	case ':':

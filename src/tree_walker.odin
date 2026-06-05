@@ -1,5 +1,6 @@
 package palladium
 
+import "core:log"
 import "core:fmt"
 import "core:reflect"
 
@@ -10,11 +11,19 @@ Runtime :: struct {
 	scopes: [dynamic]map[string]Value,
 }
 
+// FUTURE: when we get to bytecode,
+//         make this all inline
+Array :: struct {
+	length: i64,
+	data:   [^]Value,
+}
+
 Value :: union {
 	i64,
 	string,
 	bool,
 	Function,
+	Array,
 }
 
 Runtime_Error_Type :: enum {
@@ -23,6 +32,7 @@ Runtime_Error_Type :: enum {
 	Type_Error,
 	Bad_Control_Flow,
 	Bad_Call,
+	Out_Of_Bounds_Index,
 }
 
 Runtime_Error :: struct {
@@ -118,6 +128,8 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation 
 		}
 	case ^Variable_Write_Node:
 		write_variable(rt, type) or_return
+	case ^Index_Write_Node:
+	    write_index(rt, type) or_return
 	case ^If_Node:
 		execute_if(rt, type) or_return
 	case ^While_Node:
@@ -234,6 +246,24 @@ execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Runtime_Propagation {
 }
 
 @(require_results)
+write_index :: proc(rt: ^Runtime, node: ^Index_Write_Node) -> Runtime_Propagation {
+    target := evaluate_expression(rt, node.target.base) or_return
+	arr := unwrap_value(target, Array) or_return
+	assert(arr.data != nil, "nil array data")
+   
+	index_expr := evaluate_expression(rt, node.target.index) or_return
+	index := unwrap_value(index_expr, i64) or_return
+   
+	if index < 0 || index >= arr.length {
+		return Runtime_Error{type = .Out_Of_Bounds_Index, message = fmt.tprintf("Index %d is out of bounds for array of length %d", index, arr.length)}
+	}
+   
+	arr.data[index] = evaluate_expression(rt, node.value) or_return
+
+	return nil
+}
+
+@(require_results)
 write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Runtime_Propagation {
 	var := resolve_variable(rt, node.name)
 
@@ -263,9 +293,57 @@ evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Runtime_Propaga
 		return type.value, nil
 	case ^Call_Node:
 		return call_function(rt, type)
+	case ^Index_Node:
+		return evaluate_index(rt, type)
+	case ^Compound_Node:
+	    return evaluate_compound(rt, type)
 	}
 
 	fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(expr))
+}
+
+// FUTURE: try avoiding using types at runtime
+//         maybe swap out the AST nodes in type checking?
+//         array lengths could also be reduced to integers that way
+evaluate_compound :: proc(rt: ^Runtime, expr: ^Compound_Node) -> (_v: Value, _e: Runtime_Propagation) {
+    assert(expr.type != nil, "Compounds need types at runtime")
+    #partial switch t in expr.type.? {
+        case ^Array_Type_Node:
+            length_expr := evaluate_expression(rt, t.length) or_return
+            length := unwrap_value(length_expr, i64) or_return
+            // FUTURE: this always leaks. probably 
+            //         okay for now, but needs 
+            //         fixing for bytecode
+            values := make([^]Value, length)
+
+            assert(length == i64(len(expr.values)), "bad thing type checker skipped")
+
+            for elem, i in expr.values {
+                values[i] = evaluate_expression(rt, elem) or_return
+            }
+            
+            return Array {
+                data = values,
+                length = length
+            }, nil
+        case:
+            fmt.panicf("Impossible compound type '%s'", reflect.union_variant_typeid(expr.type.?))
+    }
+}
+
+evaluate_index :: proc(rt: ^Runtime, expr: ^Index_Node) -> (_val: Value, _ret: Runtime_Propagation) {
+	target := evaluate_expression(rt, expr.base) or_return
+	arr := unwrap_value(target, Array) or_return
+	assert(arr.data != nil, "nil array data")
+
+	index_expr := evaluate_expression(rt, expr.index) or_return
+	index := unwrap_value(index_expr, i64) or_return
+
+	if index < 0 || index >= arr.length {
+		return {}, Runtime_Error{type = .Out_Of_Bounds_Index, message = fmt.tprintf("Index %d is out of bounds for array of length %d", index, arr.length)}
+	}
+
+	return arr.data[index], nil
 }
 
 call_function :: proc(rt: ^Runtime, call: ^Call_Node) -> (_val: Value, _ret: Runtime_Propagation) {
@@ -394,18 +472,22 @@ evaluate_regular_binary_expression :: proc(
 	fmt.panicf("Impossible binary expression operator %s", expr.op)
 }
 
-values_equal :: proc(a, b: Value) -> (bool, Runtime_Propagation) {
+values_equal :: proc(a, b: Value) -> (_eq: bool, _err: Runtime_Propagation) {
 	a_type := reflect.union_variant_typeid(a)
 	b_type := reflect.union_variant_typeid(b)
 
 	if a_type != b_type {
-		return false, Runtime_Error {
-			type = .Type_Error,
-			message = fmt.tprintf(
-				"Expected both sides of equality to be the same type, but but recieved %s and %s",
-				a_type,
-				b_type,
-			),
+		when CHECKED_RUNTIME {
+			return false, Runtime_Error {
+				type = .Type_Error,
+				message = fmt.tprintf(
+					"Expected both sides of equality to be the same type, but but recieved %s and %s",
+					a_type,
+					b_type,
+				),
+			}
+		} else {
+			panic("Sides of equality are not equal.")
 		}
 	}
 
@@ -416,6 +498,28 @@ values_equal :: proc(a, b: Value) -> (bool, Runtime_Propagation) {
 		return a.(bool) == b.(bool), nil
 	case string:
 		return a.(string) == b.(string), nil
+	case Array:
+		aarr := a.(Array)
+		barr := b.(Array)
+		when CHECKED_RUNTIME {
+			if aarr.length != barr.length {
+				return false, Runtime_Error {
+					type = .Type_Error,
+					message = fmt.tprintf(
+						"Both arrays should have the same length, recieved %d and %d",
+						aarr.length,
+						barr.length,
+					),
+				}
+			}
+		} else {
+			for i in 0 ..< aarr.length {
+				if !(values_equal(aarr.data[i], barr.data[i]) or_return) {
+				    return false, nil
+				}
+			}
+			return true, nil
+		}
 	case Function:
 		return a.(Function).body == b.(Function).body, nil
 	}
@@ -445,9 +549,16 @@ when CHECKED_RUNTIME {
 	}
 
 } else {
-	unwrap_value :: proc(val: Value, $T: typeid, loc := #caller_location) -> (T, Runtime_Propagation) {
+	unwrap_value :: proc(
+		val: Value,
+		$T: typeid,
+		loc := #caller_location,
+	) -> (
+		T,
+		Runtime_Propagation,
+	) {
 		unwrapped, ok := val.(T)
-		assert(ok, loc=loc)
+		assert(ok, loc = loc)
 		return unwrapped, nil
 	}
 }
