@@ -63,7 +63,7 @@ test_tokenize_invalid :: proc(t: ^testing.T) {
 test_parse_valid_expression :: proc(t: ^testing.T) {
 	p := make_parser("1 + 2 + 3")
 
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 	testing.expect_value(t, err, nil)
 	bin_op := expect_and_unwrap(t, ast, ^Binary_Op_Node)
 	left := expect_and_unwrap(t, bin_op.left, ^Binary_Op_Node)
@@ -78,7 +78,7 @@ test_parse_valid_expression :: proc(t: ^testing.T) {
 test_parse_expression_precedence :: proc(t: ^testing.T) {
 	p := make_parser("1 + 2 * 3 + 4")
 
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 	testing.expect_value(t, err, nil)
 	bin_op := expect_and_unwrap(t, ast, ^Binary_Op_Node)
 	left := expect_and_unwrap(t, bin_op.left, ^Binary_Op_Node)
@@ -90,9 +90,9 @@ test_parse_expression_precedence :: proc(t: ^testing.T) {
 	left_right_left := expect_and_unwrap(t, left_right.left, ^Integer_Node)
 	left_right_right := expect_and_unwrap(t, left_right.right, ^Integer_Node)
 
-	testing.expect(t, bin_op.op == .Plus)
-	testing.expect(t, left.op == .Plus)
-	testing.expect(t, left_right.op == .Star)
+	testing.expect(t, bin_op.op == .Addition)
+	testing.expect(t, left.op == .Addition)
+	testing.expect(t, left_right.op == .Multiplication)
 
 	testing.expect(t, left_left.value == 1)
 	testing.expect(t, left_right_left.value == 2)
@@ -103,19 +103,19 @@ test_parse_expression_precedence :: proc(t: ^testing.T) {
 @(test)
 test_parse_parentheses :: proc(t: ^testing.T) {
 	p := make_parser("(1 + 2) * (3 + 4)")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
 	mul := expect_and_unwrap(t, ast, ^Binary_Op_Node)
 
-	testing.expect_value(t, mul.op, Token_Type.Star)
+	testing.expect_value(t, mul.op, Binary_Operation.Multiplication)
 
 	left := expect_and_unwrap(t, mul.left, ^Binary_Op_Node)
 	right := expect_and_unwrap(t, mul.right, ^Binary_Op_Node)
 
-	testing.expect_value(t, left.op, Token_Type.Plus)
-	testing.expect_value(t, right.op, Token_Type.Plus)
+	testing.expect_value(t, left.op, Binary_Operation.Addition)
+	testing.expect_value(t, right.op, Binary_Operation.Addition)
 }
 
 @(test)
@@ -189,7 +189,7 @@ test_variable_declaration :: proc(t: ^testing.T) {
 @(test)
 test_variable_read_parsing :: proc(t: ^testing.T) {
 	p := make_parser("x + 12")
-	expr, err := parse_expression(&p)
+	expr, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
@@ -291,7 +291,7 @@ test_string_parsing :: proc(t: ^testing.T) {
 @(test)
 test_string_escape_parsing :: proc(t: ^testing.T) {
 	p := make_parser(`"\n\"\\abc"`)
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
@@ -303,7 +303,7 @@ test_string_escape_parsing :: proc(t: ^testing.T) {
 @(test)
 test_string_bad_escape_parsing :: proc(t: ^testing.T) {
 	p := make_parser(`"\q\g\p"`)
-	_, err := parse_expression(&p)
+	_, err := parse_expression(&p, .None)
 
 	testing.expect(t, err != nil)
 	testing.expect_value(t, err.?.type, Parser_Error_Type.Invalid_Escape)
@@ -376,7 +376,7 @@ test_tokenize_booleans :: proc(t: ^testing.T) {
 @(test)
 test_parse_booleans :: proc(t: ^testing.T) {
 	p := make_parser("true + false")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 	expect_nil(t, err)
 
 	add := expect_and_unwrap(t, ast, ^Binary_Op_Node)
@@ -419,61 +419,61 @@ test_tokenize_bool_ops :: proc(t: ^testing.T) {
 @(test)
 test_parse_bool_ops :: proc(t: ^testing.T) {
 	p := make_parser("true || false && false || !false")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
 	and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-	testing.expect_value(t, and.op, Token_Type.Double_Amp)
+	testing.expect_value(t, and.op, Binary_Operation.Logical_And)
 
 	left := expect_and_unwrap(t, and.left, ^Binary_Op_Node)
 	right := expect_and_unwrap(t, and.right, ^Binary_Op_Node)
 
-	testing.expect_value(t, left.op, Token_Type.Double_Pipe)
-	testing.expect_value(t, right.op, Token_Type.Double_Pipe)
+	testing.expect_value(t, left.op, Binary_Operation.Logical_Or)
+	testing.expect_value(t, right.op, Binary_Operation.Logical_Or)
 
 	right_right := expect_and_unwrap(t, right.right, ^Unary_Op_Node)
-	testing.expect_value(t, right_right.op, Token_Type.Exclamation_Point)
+	testing.expect_value(t, right_right.op, Prefix_Operation.Logical_Not)
 }
 
 @(test)
 test_bool_op_precedence :: proc(t: ^testing.T) {
 	p := make_parser("1 + 1 || 2 * 2")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
 	or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-	testing.expect_value(t, or.op, Token_Type.Double_Pipe)
+	testing.expect_value(t, or.op, Binary_Operation.Logical_Or)
 
 	left := expect_and_unwrap(t, or.left, ^Binary_Op_Node)
 	right := expect_and_unwrap(t, or.right, ^Binary_Op_Node)
 
-	testing.expect_value(t, left.op, Token_Type.Plus)
-	testing.expect_value(t, right.op, Token_Type.Star)
+	testing.expect_value(t, left.op, Binary_Operation.Addition)
+	testing.expect_value(t, right.op, Binary_Operation.Multiplication)
 }
 
 @(test)
 test_bool_op_precedence_2 :: proc(t: ^testing.T) {
 	p := make_parser("!a + !b")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
 	or := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-	testing.expect_value(t, or.op, Token_Type.Plus)
+	testing.expect_value(t, or.op, Binary_Operation.Addition)
 
 	left := expect_and_unwrap(t, or.left, ^Unary_Op_Node)
 	right := expect_and_unwrap(t, or.right, ^Unary_Op_Node)
 
-	testing.expect_value(t, left.op, Token_Type.Exclamation_Point)
-	testing.expect_value(t, right.op, Token_Type.Exclamation_Point)
+	testing.expect_value(t, left.op, Prefix_Operation.Logical_Not)
+	testing.expect_value(t, right.op, Prefix_Operation.Logical_Not)
 }
 
 @(test)
 test_unary_nesting_parse :: proc(t: ^testing.T) {
 	p := make_parser("!!!a")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
@@ -562,12 +562,12 @@ test_comparison_op_eval_false :: proc(t: ^testing.T) {
 @(test)
 test_equality_parse :: proc(t: ^testing.T) {
 	p := make_parser("1 || 2 == 3 + 4")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	testing.expect_value(t, err, nil)
 
 	eq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-	testing.expect_value(t, eq.op, Token_Type.Double_Equals)
+	testing.expect_value(t, eq.op, Binary_Operation.Equal_To)
 }
 
 @(test)
@@ -600,15 +600,17 @@ test_comparison_op_tokens :: proc(t: ^testing.T) {
 @(test)
 test_comparison_op_parsing :: proc(t: ^testing.T) {
 	p := make_parser("a < b || b < c && c >= d")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 	expect_nil(t, err)
 
 	and := expect_and_unwrap(t, ast, ^Binary_Op_Node)
-	testing.expect_value(t, and.op, Token_Type.Double_Amp)
+	testing.expect_value(t, and.op, Binary_Operation.Logical_And)
 
+	left := expect_and_unwrap(t, and.left, ^Binary_Op_Node)
 	right := expect_and_unwrap(t, and.right, ^Binary_Op_Node)
 
-	testing.expect_value(t, right.op, Token_Type.Greater_Equals)
+	testing.expect_value(t, right.op, Binary_Operation.Greater_Than_Or_Equal_To)
+	testing.expect_value(t, left.op, Binary_Operation.Logical_Or)
 }
 
 @(test)
@@ -716,12 +718,12 @@ test_while_execution :: proc(t: ^testing.T) {
 test_not_equals_parsing :: proc(t: ^testing.T) {
 	p := make_parser("x != y")
 
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 	expect_nil(t, err)
 
 	neq := expect_and_unwrap(t, ast, ^Binary_Op_Node)
 
-	testing.expect_value(t, neq.op, Token_Type.Exclamation_Equals)
+	testing.expect_value(t, neq.op, Binary_Operation.Not_Equal_To)
 }
 
 @(test)
@@ -886,7 +888,7 @@ test_function_parsing :: proc(t: ^testing.T) {
 @(test)
 test_function_call_parsing :: proc(t: ^testing.T) {
 	p := make_parser("x(y(), a, b())")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	expect_nil(t, err)
 
@@ -901,7 +903,7 @@ test_function_call_parsing :: proc(t: ^testing.T) {
 @(test)
 test_call_chaining :: proc(t: ^testing.T) {
 	p := make_parser("x(1)(2)(3)(4)")
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 
 	expect_nil(t, err)
 
@@ -1167,7 +1169,7 @@ execute_single_expression :: proc(
 	Runtime_Propagation,
 ) {
 	p := make_parser(source)
-	ast, err := parse_expression(&p)
+	ast, err := parse_expression(&p, .None)
 	testing.expect_value(t, err, nil, loc = loc)
 
 	checker := make_checker(context.temp_allocator)

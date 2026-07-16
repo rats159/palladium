@@ -381,7 +381,7 @@ evaluate_short_circuiting_binary_expression :: proc(
 ) {
 	left := evaluate_expression(rt, expr.left) or_return
 	#partial switch expr.op {
-	case .Double_Pipe:
+	case .Logical_Or:
 		left := unwrap_value(left, bool) or_return
 
 		if left do return true, nil
@@ -392,7 +392,7 @@ evaluate_short_circuiting_binary_expression :: proc(
 		if right_raw do return true, nil
 
 		return false, nil
-	case .Double_Amp:
+	case .Logical_And:
 		left := unwrap_value(left, bool) or_return
 
 		if !left do return false, nil
@@ -432,39 +432,39 @@ evaluate_regular_binary_expression :: proc(
 	left := evaluate_expression(rt, expr.left) or_return
 	right := evaluate_expression(rt, expr.right) or_return
 	#partial switch expr.op {
-	case .Plus:
+	case .Addition:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left + right, nil
-	case .Minus:
+	case .Subtraction:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left - right, nil
-	case .Star:
+	case .Multiplication:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left * right, nil
-	case .Slash:
+	case .Division:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left / right, nil
-	case .Double_Equals:
+	case .Equal_To:
 		return values_equal(left, right)
-	case .Exclamation_Equals:
+	case .Not_Equal_To:
 		return !(values_equal(left, right) or_return), nil
-	case .Less:
+	case .Less_Than:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left < right, nil
-	case .Greater:
+	case .Greater_Than:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left > right, nil
-	case .Less_Equals:
+	case .Less_Than_Or_Equal_To:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left <= right, nil
-	case .Greater_Equals:
+	case .Greater_Than_Or_Equal_To:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left >= right, nil
@@ -528,9 +528,9 @@ values_equal :: proc(a, b: Value) -> (_eq: bool, _err: Runtime_Propagation) {
 	fmt.panicf("Impossible value type %s", a_type)
 }
 
-short_circuits :: proc(op: Token_Type) -> bool {
+short_circuits :: proc(op: Binary_Operation) -> bool {
 	#partial switch op {
-	case .Double_Pipe, .Double_Amp:
+	case .Logical_Or, .Logical_And:
 		return true
 	case:
 		return false

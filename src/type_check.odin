@@ -748,10 +748,10 @@ converts_to :: proc(t: ^Type, target: ^Type) -> bool {
 	return false
 }
 
-check_binary_expression :: proc(checker: ^Checker, left, right: ^Type, op: Token_Type) -> ^Type {
+check_binary_expression :: proc(checker: ^Checker, left, right: ^Type, op: Binary_Operation) -> ^Type {
 	if type_is_integer(left) && type_is_integer(right) {
 		#partial switch op {
-		case .Plus, .Minus, .Star, .Slash:
+		case .Addition, .Subtraction, .Multiplication, .Division:
 			return left
 		}
 	}
@@ -761,12 +761,12 @@ check_binary_expression :: proc(checker: ^Checker, left, right: ^Type, op: Token
 	}
 
 	if types_are_equivalent(left, right) {
-		if op == .Double_Equals || op == .Exclamation_Equals {
+		if op == .Equal_To || op == .Not_Equal_To {
 			return get_type(checker, Builtin_Type.Bool_Literal)
 		}
 
 		if type_is_integer(left) {
-			if op == .Less || op == .Greater || op == .Less_Equals || op == .Greater_Equals {
+			if op == .Less_Than || op == .Greater_Than || op == .Less_Than_Or_Equal_To || op == .Greater_Than_Or_Equal_To {
 				return get_type(checker, Builtin_Type.Bool_Literal)
 			}
 		}
