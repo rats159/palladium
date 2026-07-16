@@ -1,5 +1,7 @@
+#+vet explicit-allocators
 package palladium
 
+import "core:container/xar"
 import "base:runtime"
 import "core:fmt"
 import "core:reflect"
@@ -18,10 +20,6 @@ Variable_Write_Node :: struct {
 	value: Node,
 }
 
-// Named_Type_Node :: struct {
-// 	name: string,
-// }
-
 Variable_Declaration_Node :: struct {
 	name:  string,
 	type:  Maybe(Node),
@@ -35,7 +33,7 @@ Parameter_Node :: struct {
 
 Function_Declaration_Node :: struct {
 	name:        string,
-	parameters:  []Parameter_Node,
+	parameters:  xar.Array(Parameter_Node, 2),
 	body:        Node,
 	return_type: Node,
 }
@@ -57,7 +55,7 @@ Variable_Read_Node :: struct {
 }
 
 Compound_Node :: struct {
-	values: []Node,
+	values: xar.Array(Node, 4),
 	type:   Maybe(Node),
 }
 
@@ -88,7 +86,7 @@ Unary_Op_Node :: struct {
 }
 
 Block_Node :: struct {
-	statements: []Node,
+	statements: xar.Array(Node, 4),
 }
 
 Parser_Error_Type :: enum {
@@ -110,7 +108,7 @@ If_Node :: struct {
 	else_body: Maybe(Node),
 }
 
-// TODO: labels?
+// FUTURE: labels?
 Break_Node :: struct {}
 Continue_Node :: struct {}
 
@@ -125,7 +123,7 @@ While_Node :: struct {
 
 Call_Node :: struct {
 	callee:    Node,
-	arguments: []Node,
+	arguments: xar.Array(Node, 4),
 }
 
 Node :: union {
@@ -176,14 +174,16 @@ parse_statement_list :: proc(
 	_node: Node,
 	_err: Maybe(Parser_Error),
 ) {
-	statements := make([dynamic]Node, p.allocator)
+    statements: xar.Array(Node, 4)
+    xar.array_init(&statements, p.allocator)
 	for !parser_match(p, until) {
 		statement := parse_statement(p) or_return
-		append(&statements, statement)
+		xar.append(&statements, statement)
 	}
 
 	node := make_node(p, Block_Node)
-	node.statements = statements[:]
+
+	node.statements = statements
 
 	return node, nil
 }
@@ -243,14 +243,15 @@ parse_type :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 		return node, nil
 	}
 
-	return {}, Parser_Error{type = .Invalid_Value, message = fmt.aprintf("Token %s cannot begin a type", token.type)}
+	return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Token %s cannot begin a type", token.type)}
 }
 
 parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 	_ = parser_expect(p, .Function) or_return
 	name := parser_expect(p, .Identifier) or_return
 
-	parameters := make([dynamic]Parameter_Node, p.allocator)
+	parameters: xar.Array(Parameter_Node, 2)
+	xar.array_init(&parameters, p.allocator)
 
 	_ = parser_expect(p, .Open_Paren) or_return
 
@@ -258,7 +259,7 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 		name := parser_expect(p, .Identifier) or_return
 		_ = parser_expect(p, .Colon) or_return
 		type := parse_type(p) or_return
-		append(&parameters, Parameter_Node{name.value, type})
+		xar.append(&parameters, Parameter_Node{name.value, type})
 		if parser_match(p, .Close_Paren) {
 			break
 		}
@@ -275,7 +276,7 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 
 	node.body = body
 	node.name = name.value
-	node.parameters = parameters[:]
+	node.parameters = parameters
 	node.return_type = type
 
 	return node, nil
@@ -538,14 +539,14 @@ parse_unary_postfix :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Erro
 
 	for {
 		if parser_match(p, .Open_Paren) {
-			arguments := make([dynamic]Node, p.allocator)
-
+		    arguments: xar.Array(Node, 4)
+			xar.array_init(&arguments, p.allocator)
 			old_allow_compound := p.allow_compound_literal
 			defer p.allow_compound_literal = old_allow_compound
 			p.allow_compound_literal = true
 			for !parser_match(p, .Close_Paren) {
 				name := parse_expression(p) or_return
-				append(&arguments, name)
+				xar.append(&arguments, name)
 				if parser_match(p, .Close_Paren) {
 					break
 				}
@@ -553,7 +554,7 @@ parse_unary_postfix :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Erro
 			}
 
 			new_node := make_node(p, Call_Node)
-			new_node.arguments = arguments[:]
+			new_node.arguments = arguments
 			new_node.callee = node
 
 			node = new_node
@@ -680,15 +681,16 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 		return parse_compound(p)
 	}
 
-	return {}, Parser_Error{type = .Invalid_Value, message = fmt.aprintf("Token %s has no value", tok.type)}
+	return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Token %s has no value", tok.type)}
 }
 
 parse_compound :: proc(p: ^Parser) -> (_e: Node, _r: Maybe(Parser_Error)) {
-	expressions := make([dynamic]Node, p.allocator)
+    expressions: xar.Array(Node, 4)
+    xar.init(&expressions, p.allocator)
 
 	for !parser_match(p, .Close_Curly) {
 		expr := parse_expression(p) or_return
-		append(&expressions, expr)
+		xar.append(&expressions, expr)
 		if parser_match(p, .Close_Curly) {
 			break
 		}
@@ -697,7 +699,7 @@ parse_compound :: proc(p: ^Parser) -> (_e: Node, _r: Maybe(Parser_Error)) {
 
 	node := make_node(p, Compound_Node)
 	node.type = nil
-	node.values = expressions[:]
+	node.values = expressions
 
 	return node, nil
 }

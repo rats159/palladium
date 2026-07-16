@@ -2,6 +2,7 @@ package palladium
 
 import "base:intrinsics"
 import "base:runtime"
+import "core:container/xar"
 import "core:fmt"
 import "core:log"
 import "core:reflect"
@@ -224,10 +225,10 @@ check_statement :: proc(checker: ^Checker, stmt: Node) {
 	case ^Variable_Write_Node:
 		check_variable_write(checker, type)
 	case ^Index_Write_Node:
-	    check_index_write(checker, type)
+		check_index_write(checker, type)
 	case ^Block_Node:
 		push_type_scope(checker)
-		for stmt in type.statements {
+		for iter := xar.iterator(&type.statements); stmt in xar.iterate_by_val(&iter) {
 			check_statement(checker, stmt)
 		}
 		pop_type_scope(checker)
@@ -373,10 +374,10 @@ evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
 	case ^Function_Declaration_Node:
 		ret := evaluate_type(checker, variant.return_type)
 
-		params := make([]Parameter_Type, len(variant.parameters), checker.allocator)
+		params := make([]Parameter_Type, xar.len(variant.parameters), checker.allocator)
 		for &param, i in params {
-			param.name = variant.parameters[i].name
-			param.type = evaluate_type(checker, variant.parameters[i].type)
+			param.name = xar.get(&variant.parameters,i).name
+			param.type = evaluate_type(checker, xar.get(&variant.parameters,i).type)
 		}
 		return get_type(checker, Function_Type{parameters = params, ret = ret})
 	case ^Array_Type_Node:
@@ -499,11 +500,10 @@ check_compound :: proc(
 		return &invalid_type
 	}
 
-	
-	
+
 	if type_is_array(target_type) {
 		arr_type := target_type.(Array_Type)
-		if arr_type.length != len(compound.values) {
+		if arr_type.length != xar.len(compound.values) {
 			append(
 				&checker.errors,
 				Type_Error {
@@ -511,13 +511,13 @@ check_compound :: proc(
 					message = fmt.tprintf(
 						"Wrong number of values for array literal! Expected %d but received %d",
 						arr_type.length,
-						len(compound.values),
+						xar.len(compound.values),
 					),
 				},
 			)
 		}
 
-		for expr in compound.values {
+		for iter := xar.iterator(&compound.values); expr in xar.iterate_by_val(&iter) {
 			elem_type := check_expression(checker, expr, arr_type.elem_type)
 
 			if !is_convertible_from_to(elem_type, arr_type.elem_type) {
@@ -635,7 +635,7 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
 	}
 
 	func_type := call_type.(Function_Type)
-	if len(func_type.parameters) != len(node.arguments) {
+	if len(func_type.parameters) != xar.len(node.arguments) {
 		append(
 			&checker.errors,
 			Type_Error {
@@ -643,7 +643,7 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
 				message = fmt.tprintf(
 					"Wrong number of arguments for call! Expected %d but received %d",
 					len(func_type.parameters),
-					len(node.arguments),
+					xar.len(node.arguments),
 				),
 			},
 		)
@@ -651,9 +651,9 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
 		return &invalid_type
 	}
 
-	for i in 0 ..< len(node.arguments) {
+	for i in 0 ..< xar.len(node.arguments) {
 		param := func_type.parameters[i]
-		arg_type := check_expression(checker, node.arguments[i], param.type)
+		arg_type := check_expression(checker, xar.get(&node.arguments,i), param.type)
 
 		if !types_are_equivalent(arg_type, param.type) {
 			append(

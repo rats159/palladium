@@ -1,5 +1,6 @@
 package palladium
 
+import "core:container/xar"
 import "core:log"
 import "core:fmt"
 import "core:reflect"
@@ -41,7 +42,7 @@ Runtime_Error :: struct {
 }
 
 Function :: struct {
-	parameters: []Parameter_Node,
+	parameters: xar.Array(Parameter_Node, 2),
 	body:       Node,
 }
 
@@ -89,7 +90,7 @@ execute_file :: proc(rt: ^Runtime, file: Node) -> Maybe(Runtime_Error) {
 	// no pop so we can read variables in tests
 	push_scope(rt)
 
-	for statement in file.(^Block_Node).statements {
+	for iter := xar.iterator(&file.(^Block_Node).statements); statement in xar.iterate_by_val(&iter) {
 		res := execute_statement(rt, statement)
 		switch type in res {
 		case Runtime_Error:
@@ -123,7 +124,7 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation 
 	case ^Block_Node:
 		push_scope(rt)
 		defer pop_scope(rt)
-		for stmt in type.statements {
+		for iter := xar.iterator(&type.statements); stmt in xar.iterate_by_val(&iter) {
 			execute_statement(rt, stmt) or_return
 		}
 	case ^Variable_Write_Node:
@@ -316,9 +317,9 @@ evaluate_compound :: proc(rt: ^Runtime, expr: ^Compound_Node) -> (_v: Value, _e:
             //         fixing for bytecode
             values := make([^]Value, length)
 
-            assert(length == i64(len(expr.values)), "bad thing type checker skipped")
+            assert(length == i64(xar.len(expr.values)), "bad thing type checker skipped")
 
-            for elem, i in expr.values {
+            for iter := xar.iterator(&expr.values); elem, i in xar.iterate_by_val(&iter) {
                 values[i] = evaluate_expression(rt, elem) or_return
             }
             
@@ -350,15 +351,15 @@ call_function :: proc(rt: ^Runtime, call: ^Call_Node) -> (_val: Value, _ret: Run
 	callee := evaluate_expression(rt, call.callee) or_return
 	function := unwrap_value(callee, Function) or_return
 
-	if len(function.parameters) != len(call.arguments) {
-		return {}, Runtime_Error{type = .Bad_Call, message = fmt.tprintf("Bad argument count for function. Expected %d but recieved %d", len(function.parameters), len(call.arguments))}
+	if xar.len(function.parameters) != xar.len(call.arguments) {
+		return {}, Runtime_Error{type = .Bad_Call, message = fmt.tprintf("Bad argument count for function. Expected %d but recieved %d", xar.len(function.parameters), xar.len(call.arguments))}
 	}
 
 	push_scope(rt)
 	defer pop_scope(rt)
 
-	for arg, i in call.arguments {
-		name := function.parameters[i]
+	for iter := xar.iterator(&call.arguments); arg, i in xar.iterate_by_val(&iter) {
+		name := xar.get(&function.parameters,i)
 		value := evaluate_expression(rt, arg) or_return
 		declare_parameter(rt, name.name, value) or_return
 	}

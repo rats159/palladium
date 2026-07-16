@@ -1,5 +1,6 @@
 package palladium
 
+import "core:container/xar"
 import "base:intrinsics"
 import "core:fmt"
 import "core:log"
@@ -224,11 +225,11 @@ test_multi_statement :: proc(t: ^testing.T) {
 	expect_fine_types(t, ast)
 
 	body := expect_and_unwrap(t, ast, ^Block_Node)
-	testing.expect_value(t, len(body.statements), 3)
+	testing.expect_value(t, xar.len(body.statements), 3)
 
-	_ = expect_and_unwrap(t, body.statements[0], ^Binary_Op_Node)
-	_ = expect_and_unwrap(t, body.statements[1], ^Binary_Op_Node)
-	_ = expect_and_unwrap(t, body.statements[2], ^Variable_Declaration_Node)
+	_ = expect_and_unwrap(t, xar.get(&body.statements,0), ^Binary_Op_Node)
+	_ = expect_and_unwrap(t, xar.get(&body.statements,1), ^Binary_Op_Node)
+	_ = expect_and_unwrap(t, xar.get(&body.statements,2), ^Variable_Declaration_Node)
 }
 
 @(test)
@@ -238,7 +239,7 @@ test_assignment_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, nil)
 
 	block := expect_and_unwrap(t, ast, ^Block_Node)
-	assignment := expect_and_unwrap(t, block.statements[0], ^Variable_Write_Node)
+	assignment := expect_and_unwrap(t, xar.get(&block.statements,0), ^Variable_Write_Node)
 
 	testing.expect_value(t, assignment.name, "x")
 }
@@ -875,11 +876,11 @@ test_function_parsing :: proc(t: ^testing.T) {
 
 	func := expect_and_unwrap(t, ast, ^Function_Declaration_Node)
 
-	testing.expect_value(t, len(func.parameters), 2)
+	testing.expect_value(t, xar.len(func.parameters), 2)
 
 	body := expect_and_unwrap(t, func.body, ^Block_Node)
 
-	ret := expect_and_unwrap(t, body.statements[0], ^Return_Node)
+	ret := expect_and_unwrap(t, xar.get(&body.statements,0), ^Return_Node)
 }
 
 @(test)
@@ -890,11 +891,11 @@ test_function_call_parsing :: proc(t: ^testing.T) {
 	expect_nil(t, err)
 
 	call := expect_and_unwrap(t, ast, ^Call_Node)
-	testing.expect_value(t, len(call.arguments), 3)
+	testing.expect_value(t, xar.len(call.arguments), 3)
 
-	arg_1 := expect_and_unwrap(t, call.arguments[0], ^Call_Node)
-	arg_2 := expect_and_unwrap(t, call.arguments[1], ^Variable_Read_Node)
-	arg_3 := expect_and_unwrap(t, call.arguments[2], ^Call_Node)
+	arg_1 := expect_and_unwrap(t, xar.get(&call.arguments,0), ^Call_Node)
+	arg_2 := expect_and_unwrap(t, xar.get(&call.arguments,1), ^Variable_Read_Node)
+	arg_3 := expect_and_unwrap(t, xar.get(&call.arguments,2), ^Call_Node)
 }
 
 @(test)
@@ -909,7 +910,7 @@ test_call_chaining :: proc(t: ^testing.T) {
 	third := expect_and_unwrap(t, second.callee, ^Call_Node)
 	fourth := expect_and_unwrap(t, third.callee, ^Call_Node)
 
-	num := expect_and_unwrap(t, first.arguments[0], ^Integer_Node)
+	num := expect_and_unwrap(t, xar.get(&first.arguments,0), ^Integer_Node)
 
 	testing.expect_value(t, num.value, 4)
 }
@@ -932,7 +933,7 @@ test_function_definition :: proc(t: ^testing.T) {
 	add, read_err := read_variable(&rt, "add")
 	expect_nil(t, read_err)
 	func := expect_and_unwrap(t, add, Function)
-	testing.expect_value(t, len(func.parameters), 2)
+	testing.expect_value(t, xar.len(func.parameters), 2)
 }
 
 @(test)
@@ -993,9 +994,9 @@ test_compound_parsing :: proc(t: ^testing.T) {
 	expect_nil(t, err)
 
 	block := expect_and_unwrap(t, ast, ^Block_Node)
-	decl := expect_and_unwrap(t, block.statements[0], ^Variable_Declaration_Node)
+	decl := expect_and_unwrap(t, xar.get(&block.statements,0), ^Variable_Declaration_Node)
 	comp := expect_and_unwrap(t, decl.value, ^Compound_Node)
-	testing.expect_value(t, len(comp.values), 4)
+	testing.expect_value(t, xar.len(comp.values), 4)
 }
 
 @(test)
