@@ -80,13 +80,16 @@ Checked_Statement :: union {
 	^Checked_Declaration,
 	^Checked_Break,
 	^Checked_Continue,
+	^Checked_Return
 }
+Checked_Return :: struct {val: Maybe(Checked_Expression)}
 Checked_Break :: struct {}
 Checked_Continue :: struct {}
 
 Checked_Declaration :: struct {
 	name: string,
 	type: ^Type,
+	value: Maybe(Checked_Expression)
 }
 
 Checked_Block :: struct {
@@ -129,6 +132,7 @@ Checked_Expression :: struct {
 		^Boolean_Node,
 		^Integer_Node,
 		^String_Node,
+		Function,
 		^Checked_Variable_Read,
 		^Checked_Call,
 		^Array_Literal,
@@ -373,11 +377,31 @@ check_statement :: proc(checker: ^Checker, stmt: Node) -> Checked_Statement {
 		return check_function_declaration(checker, type)
 	case ^Break_Node:
 		return check_break(checker, type)
-	case ^Continue_Node:
-		return check_continue(checker, type)
+		case ^Continue_Node:
+			return check_continue(checker, type)
+			case ^Return_Node:
+				return check_return(checker, type)
 	case:
 		return check_expression_statement(checker, stmt)
 	}
+}
+
+check_return :: proc(checker: ^Checker, node: ^Return_Node) -> Checked_Statement{
+	stmt := checker_new(Checked_Return, checker)
+	
+	if node.value != nil {
+		// FUTURE: track curent function for return based hints?
+		stmt.val = check_expression(checker, node.value.?, nil)
+	}
+
+	if checker.function_depth <= 0 {
+		append(&checker.errors, Type_Error {
+			type = .Bad_Control_Flow,
+			message = "`return` can only be used inside functions!"
+		})
+	}
+	
+	return stmt
 }
 
 check_break :: proc(checker: ^Checker, node: ^Break_Node) -> Checked_Statement{
@@ -429,10 +453,31 @@ check_function_declaration :: proc(
 	decl.type = evaluate_type(checker, node)
 	declare_variable_type(checker, decl)
 	push_checker_scope(checker)
+	checker.function_depth += 1
 
-	body := check_block
+	params: xar.Array(^Checked_Declaration, 2)
+	xar.init(&params, checker.allocator)
+	for param in decl.type.(Function_Type).parameters {
+		param_decl := checker_new(Checked_Declaration, checker)
+		param_decl.name = param.name
+		param_decl.type = param.type
+		declare_variable_type(checker, param_decl)
+		xar.append(&params, param_decl)
+	}
+	
+	body := check_block(checker, node.body.(^Block_Node))
 
+	checker.function_depth -= 1
 	pop_checker_scope(checker)
+	func := Function {
+		body = body, 
+		parameters = params,
+	}
+	
+	decl.value = Checked_Expression {
+		variant = func,
+		type = decl.type
+	}
 	return decl
 }
 
@@ -446,7 +491,8 @@ check_variable_declaration :: proc(
 	}
 	decl.name = node.name
 	expr := check_expression(checker, node.value, decl.type)
-
+	decl.value = expr
+	
 	if decl.type == nil {
 		decl.type = expr.type
 	} 
@@ -655,6 +701,7 @@ check_expression :: proc(
 check_variable_read :: proc(checker: ^Checker, node: ^Variable_Read_Node) -> Checked_Expression {
 	var, found := checker_resolve_variable(checker, node.name)
 	read := checker_new(Checked_Variable_Read, checker)
+	read.decl = var
 	expr := Checked_Expression{variant = read, type = &invalid_type}
 	if !found {
 		append(
@@ -776,32 +823,33 @@ type_is_boolean :: proc(t: ^Type) -> bool {
 }
 
 check_index :: proc(checker: ^Checker, node: ^Index_Node) -> Checked_Expression {
-	target := check_expression(checker, node.base, nil)
+	array := check_expression(checker, node.base, nil)
 
 	checked_index := checker_new(Checked_Array_Index, checker)
+	checked_index.array = array
 	expr := Checked_Expression {
 		variant = checked_index,
 		type    = &invalid_type,
 	}
 
-	if !type_is_array(target.type) {
+	if !type_is_array(array.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Expected an array type for index expression, got %s",
-					type_to_string(target.type, context.temp_allocator),
+					type_to_string(array.type, context.temp_allocator),
 				),
 			},
 		)
 		return expr
 	}
 
-	arr_type := target.type.(Array_Type)
+	arr_type := array.type.(Array_Type)
 
 	index := check_expression(checker, node.index, nil)
-
+	checked_index.index = index
 	if !type_is_integer(index.type) {
 		append(
 			&checker.errors,
@@ -967,6 +1015,7 @@ check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Che
 
 	checked_node.left = left
 	checked_node.right = right
+	checked_node.op = op
 	expr := Checked_Expression {
 		variant = checked_node,
 	}
