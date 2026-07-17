@@ -1174,7 +1174,7 @@ execute_single_expression :: proc(
 
 	checker := make_checker(context.temp_allocator)
 
-	push_type_scope(&checker)
+	push_checker_scope(&checker)
 
 	declare_named_type(&checker, "string", get_type(&checker, Builtin_Type.String_Literal))
 	declare_named_type(&checker, "int", get_type(&checker, Builtin_Type.Integer_Literal))
