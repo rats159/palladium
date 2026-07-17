@@ -2,6 +2,7 @@ package palladium
 
 import "base:intrinsics"
 import "base:runtime"
+import "core:container/xar"
 import "core:fmt"
 import "core:log"
 import "core:reflect"
@@ -43,6 +44,7 @@ Checker_Error_Type :: enum {
 	Undeclared,
 	Wrong_Argument_Count,
 	Unknowable_Type,
+	Bad_Control_Flow,
 	Internal_Error,
 }
 
@@ -53,7 +55,7 @@ Type_Error :: struct {
 
 Scope :: struct {
 	type_registry: Type_Registry,
-	variables:     map[string]^Type,
+	variables:     map[string]^Checked_Declaration,
 	aliases:       map[string]^Type,
 }
 
@@ -65,27 +67,142 @@ Checker :: struct {
 	allocator:      runtime.Allocator,
 }
 
+Checked_Program :: struct {
+	statements: xar.Array(Checked_Statement, 4),
+}
+Checked_Statement :: union {
+	^Checked_Index_Write,
+	^Checked_Variable_Write,
+	^Checked_Expression_Statement,
+	^Checked_Loop,
+	^Checked_If,
+	^Checked_Block,
+	^Checked_Declaration,
+	^Checked_Break,
+	^Checked_Continue,
+	^Checked_Return
+}
+Checked_Return :: struct {val: Maybe(Checked_Expression)}
+Checked_Break :: struct {}
+Checked_Continue :: struct {}
+
+Checked_Declaration :: struct {
+	name: string,
+	type: ^Type,
+	value: Maybe(Checked_Expression)
+}
+
+Checked_Block :: struct {
+	statements: xar.Array(Checked_Statement, 4),
+}
+
+Checked_If :: struct {
+	condition: Checked_Expression,
+	body:      Checked_Statement,
+	else_body: Maybe(Checked_Statement),
+}
+
+Checked_Loop :: struct {
+	body:      Checked_Statement,
+	condition: Checked_Expression,
+}
+
+Checked_Expression_Statement :: struct {
+	expr: Checked_Expression,
+}
+
+Checked_Variable_Write :: struct {
+	target:    ^Checked_Declaration,
+	new_value: Checked_Expression,
+}
+
+Checked_Index_Write :: struct {
+	target:    Checked_Expression,
+	new_value: Checked_Expression,
+}
+
+invalid_expression := Checked_Expression{type = &invalid_type, variant = nil}
+
+Checked_Expression :: struct {
+	type:    ^Type,
+	variant: union {
+		^Checked_Binary_Op,
+		^Checked_Array_Index,
+		// FUTURE: other bool/int/string types
+		^Boolean_Node,
+		^Integer_Node,
+		^String_Node,
+		Function,
+		^Checked_Variable_Read,
+		^Checked_Call,
+		^Array_Literal,
+	},
+}
+
+Array_Literal :: struct {
+	elem_type: ^Type, 
+	body: xar.Array(Checked_Expression, 3)
+}
+
+Checked_Call :: struct {
+	callee: Checked_Expression,
+	arguments: xar.Array(Checked_Expression, 3)
+}
+
+Checked_Variable_Read :: struct {
+    decl: ^Checked_Declaration
+}
+
+// for transforming function foo() {} into foo = function(){}
+// the latter isn't actually valid syntax currently,
+// so there's no unchecked equivalent to this node
+Checked_Functions :: struct {}
+
+Checked_Array_Index :: struct {
+	array: Checked_Expression,
+	index: Checked_Expression,
+}
+
+Checked_Binary_Op :: struct {
+	left:  Checked_Expression,
+	right: Checked_Expression,
+	op:    Binary_Operation,
+}
+
 make_checker :: proc(allocator: runtime.Allocator) -> Checker {
 	checker: Checker
 	checker.allocator = allocator
 	checker.errors = make([dynamic]Type_Error, allocator)
 	checker.scopes.allocator = allocator
 
-	return checker
+	return checker 
 }
 
-check_program :: proc(program: Node, allocator: runtime.Allocator) -> []Type_Error {
+check_program :: proc(
+	root: Node,
+	allocator: runtime.Allocator,
+) -> (
+	Checked_Program,
+	[]Type_Error,
+) {
 	checker := make_checker(allocator)
+	program: Checked_Program
+	xar.array_init(&program.statements, checker.allocator)
 	// superglobal builtins
-	push_type_scope(&checker)
+	push_checker_scope(&checker)
 
 	declare_named_type(&checker, "string", get_type(&checker, Builtin_Type.String_Literal))
 	declare_named_type(&checker, "int", get_type(&checker, Builtin_Type.Integer_Literal))
 	declare_named_type(&checker, "bool", get_type(&checker, Builtin_Type.Bool_Literal))
 
-	check_statement(&checker, program)
+	body_block, is_block := root.(^Block_Node)
+	assert(is_block, "malformed program")
 
-	return checker.errors[:]
+	for iter := xar.iterator(&body_block.statements); stmt in xar.iterate_by_val(&iter) {
+		xar.append(&program.statements, check_statement(&checker, stmt))
+	}
+
+	return program, checker.errors[:]
 }
 
 make_scope :: proc(checker: ^Checker) -> Scope {
@@ -101,54 +218,62 @@ delete_scope :: proc(s: Scope) {
 	delete(s.variables)
 }
 
-push_type_scope :: proc(checker: ^Checker) {
+push_checker_scope :: proc(checker: ^Checker) {
 	append(&checker.scopes, make_scope(checker))
 }
 
-pop_type_scope :: proc(checker: ^Checker) {
+pop_checker_scope :: proc(checker: ^Checker) {
 	scope := pop(&checker.scopes)
 	delete_scope(scope)
 }
 
-declare_variable_type :: proc(checker: ^Checker, name: string, type: ^Type) {
+declare_variable_type :: proc(checker: ^Checker, decl: ^Checked_Declaration) {
 	scope := &checker.scopes[len(checker.scopes) - 1]
 
-	if name in scope.variables {
+	if decl.name in scope.variables {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Redeclaration,
-				message = fmt.tprintf("Redeclaration of variable %s in this scope", name),
+				message = fmt.tprintf("Redeclaration of variable %s in this scope", decl.name),
 			},
 		)
 	} else {
-		scope.variables[name] = type
+		scope.variables[decl.name] = decl
 	}
 }
 
-check_index_write :: proc(checker: ^Checker, node: ^Index_Write_Node) {
-	target_type := check_index(checker, node.target)
+check_index_write :: proc(checker: ^Checker, node: ^Index_Write_Node) -> Checked_Statement {
+	target := check_index(checker, node.target)
 
-	expr_type := check_expression(checker, node.value, target_type)
+	new_value := check_expression(checker, node.value, target.type)
 
+	statement := checker_new(Checked_Index_Write, checker)
+	statement.new_value = new_value
+	statement.target = target
 
-	if !is_convertible_from_to(expr_type, target_type) {
+	if !is_convertible_from_to(new_value.type, target.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Unable to assign type %s to type %s",
-					type_to_string(expr_type, context.temp_allocator),
-					type_to_string(target_type, context.temp_allocator),
+					type_to_string(new_value.type, context.temp_allocator),
+					type_to_string(target.type, context.temp_allocator),
 				),
 			},
 		)
 	}
+
+	return statement
 }
 
-check_variable_write :: proc(checker: ^Checker, node: ^Variable_Write_Node) {
-	var_type, found := resolve_variable_type(checker, node.name)
+check_variable_write :: proc(checker: ^Checker, node: ^Variable_Write_Node) -> Checked_Statement {
+	var, found := checker_resolve_variable(checker, node.name)
+
+	stmt := checker_new(Checked_Variable_Write, checker)
+	stmt.target = var
 
 	if !found {
 		append(
@@ -158,121 +283,238 @@ check_variable_write :: proc(checker: ^Checker, node: ^Variable_Write_Node) {
 				message = fmt.tprintf("Undeclared variable '%s'", node.name),
 			},
 		)
-		return
+		return stmt
 	}
 
-	expr_type := check_expression(checker, node.value, var_type)
+	expr := check_expression(checker, node.value, var.type)
+	stmt.new_value = expr
 
-
-	if !is_convertible_from_to(expr_type, var_type) {
+	if !is_convertible_from_to(expr.type, var.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Unable to assign type %s to variable %s with type %s",
-					type_to_string(expr_type, context.temp_allocator),
+					type_to_string(expr.type, context.temp_allocator),
 					node.name,
-					type_to_string(var_type, context.temp_allocator),
+					type_to_string(var.type, context.temp_allocator),
 				),
 			},
 		)
 	}
+
+	return stmt
 }
 
-check_while :: proc(checker: ^Checker, stmt: ^While_Node) {
-	cond_type := check_expression(checker, stmt.condition, nil)
+check_while :: proc(checker: ^Checker, node: ^While_Node) -> Checked_Statement {
+	stmt := checker_new(Checked_Loop, checker)
+	cond := check_expression(checker, node.condition, get_type(checker, Builtin_Type.Bool_Literal))
 
-	if !is_convertible_from_to(cond_type, get_type(checker, Builtin_Type.Bool_Literal)) {
+	stmt.condition = cond
+
+	if !is_convertible_from_to(cond.type, get_type(checker, Builtin_Type.Bool_Literal)) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Unable to convert from %s to boolean in a while loop condition",
-					type_to_string(cond_type, context.temp_allocator),
+					type_to_string(cond.type, context.temp_allocator),
 				),
 			},
 		)
 	}
 
-	check_statement(checker, stmt.body)
+	checker.loop_depth += 1
+	stmt.body = check_statement(checker, node.body)
+	checker.loop_depth -= 1
+	return stmt
 }
 
-check_if :: proc(checker: ^Checker, stmt: ^If_Node) {
-	cond_type := check_expression(checker, stmt.condition, nil)
+check_if :: proc(checker: ^Checker, node: ^If_Node) -> Checked_Statement {
+	stmt := checker_new(Checked_If, checker)
+	cond := check_expression(checker, node.condition, get_type(checker, Builtin_Type.Bool_Literal))
+	stmt.condition = cond
 
-	if !is_convertible_from_to(cond_type, get_type(checker, Builtin_Type.Bool_Literal)) {
+	if !is_convertible_from_to(cond.type, get_type(checker, Builtin_Type.Bool_Literal)) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Unable to convert from %s to boolean in an if statement condition",
-					type_to_string(cond_type, context.temp_allocator),
+					type_to_string(cond.type, context.temp_allocator),
 				),
 			},
 		)
 	}
 
+	stmt.body = check_statement(checker, node.body)
+
+	if node.else_body != nil {
+		stmt.else_body = check_statement(checker, node.else_body.?)
+	}
+
+	return stmt
 }
 
-check_statement :: proc(checker: ^Checker, stmt: Node) {
+check_statement :: proc(checker: ^Checker, stmt: Node) -> Checked_Statement {
 	#partial switch type in stmt {
 	case ^Variable_Declaration_Node:
-		check_declaration(checker, type)
+		return check_variable_declaration(checker, type)
 	case ^Variable_Write_Node:
-		check_variable_write(checker, type)
+		return check_variable_write(checker, type)
 	case ^Index_Write_Node:
-	    check_index_write(checker, type)
+		return check_index_write(checker, type)
 	case ^Block_Node:
-		push_type_scope(checker)
-		for stmt in type.statements {
-			check_statement(checker, stmt)
-		}
-		pop_type_scope(checker)
+		return check_block(checker, type)
 	case ^While_Node:
-		check_while(checker, type)
+		return check_while(checker, type)
 	case ^If_Node:
-		check_if(checker, type)
+		return check_if(checker, type)
 	case ^Function_Declaration_Node:
-		check_function_declaration(checker, type)
+		return check_function_declaration(checker, type)
+	case ^Break_Node:
+		return check_break(checker, type)
+		case ^Continue_Node:
+			return check_continue(checker, type)
+			case ^Return_Node:
+				return check_return(checker, type)
 	case:
-		check_expression(checker, stmt, nil)
+		return check_expression_statement(checker, stmt)
 	}
 }
 
-check_function_declaration :: proc(checker: ^Checker, node: ^Function_Declaration_Node) {
-	declare_variable_type(checker, node.name, evaluate_type(checker, node))
+check_return :: proc(checker: ^Checker, node: ^Return_Node) -> Checked_Statement{
+	stmt := checker_new(Checked_Return, checker)
+	
+	if node.value != nil {
+		// FUTURE: track curent function for return based hints?
+		stmt.val = check_expression(checker, node.value.?, nil)
+	}
+
+	if checker.function_depth <= 0 {
+		append(&checker.errors, Type_Error {
+			type = .Bad_Control_Flow,
+			message = "`return` can only be used inside functions!"
+		})
+	}
+	
+	return stmt
 }
 
-check_declaration :: proc(checker: ^Checker, node: ^Variable_Declaration_Node) {
-	declared_type: ^Type
+check_break :: proc(checker: ^Checker, node: ^Break_Node) -> Checked_Statement{
+	stmt := checker_new(Checked_Break, checker)
+
+	if checker.loop_depth <= 0 {
+		append(&checker.errors, Type_Error {
+			type = .Bad_Control_Flow,
+			message = "`break` can only be used inside loops!"
+		})
+	}
+	
+	return stmt
+}
+
+check_continue :: proc(checker: ^Checker, node: ^Continue_Node) -> Checked_Statement{
+	stmt := checker_new(Checked_Continue, checker)
+
+	if checker.loop_depth <= 0 {
+		append(&checker.errors, Type_Error {
+			type = .Bad_Control_Flow,
+			message = "`continue` can only be used inside loops!"
+		})
+	}
+	
+	return stmt
+}
+
+
+check_block :: proc(checker: ^Checker, node: ^Block_Node) -> Checked_Statement {
+	block := checker_new(Checked_Block, checker)
+	xar.init(&block.statements, checker.allocator)
+
+	push_checker_scope(checker)
+	for iter := xar.iterator(&node.statements); stmt in xar.iterate_by_val(&iter) {
+		xar.append(&block.statements, check_statement(checker, stmt))
+	}
+	pop_checker_scope(checker)
+
+	return block
+}
+
+check_function_declaration :: proc(
+	checker: ^Checker,
+	node: ^Function_Declaration_Node,
+) -> Checked_Statement {
+	decl := checker_new(Checked_Declaration, checker)
+	decl.name = node.name
+	decl.type = evaluate_type(checker, node)
+	declare_variable_type(checker, decl)
+	push_checker_scope(checker)
+	checker.function_depth += 1
+
+	params: xar.Array(^Checked_Declaration, 2)
+	xar.init(&params, checker.allocator)
+	for param in decl.type.(Function_Type).parameters {
+		param_decl := checker_new(Checked_Declaration, checker)
+		param_decl.name = param.name
+		param_decl.type = param.type
+		declare_variable_type(checker, param_decl)
+		xar.append(&params, param_decl)
+	}
+	
+	body := check_block(checker, node.body.(^Block_Node))
+
+	checker.function_depth -= 1
+	pop_checker_scope(checker)
+	func := Function {
+		body = body, 
+		parameters = params,
+	}
+	
+	decl.value = Checked_Expression {
+		variant = func,
+		type = decl.type
+	}
+	return decl
+}
+
+check_variable_declaration :: proc(
+	checker: ^Checker,
+	node: ^Variable_Declaration_Node,
+) -> Checked_Statement {
+	decl := checker_new(Checked_Declaration, checker)
 	if t, not_inferred := node.type.?; not_inferred {
-		declared_type = evaluate_type(checker, t)
+		decl.type = evaluate_type(checker, t)
 	}
-	expr_type := check_expression(checker, node.value, declared_type)
-
-	if declared_type == nil {
-		declared_type = expr_type
+	decl.name = node.name
+	expr := check_expression(checker, node.value, decl.type)
+	decl.value = expr
+	
+	if decl.type == nil {
+		decl.type = expr.type
+	} 
+		if !is_convertible_from_to(expr.type, decl.type) {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Conversion,
+					message = fmt.tprintf(
+						"Unable to assign type %s to variable %s with type %s",
+						type_to_string(expr.type, context.temp_allocator),
+						node.name,
+						type_to_string(decl.type, context.temp_allocator),
+					),
+				},
+			)
+		
 	}
 
-	declare_variable_type(checker, node.name, declared_type)
+	declare_variable_type(checker, decl)
 
-	if !is_convertible_from_to(expr_type, declared_type) {
-		append(
-			&checker.errors,
-			Type_Error {
-				type = .Bad_Conversion,
-				message = fmt.tprintf(
-					"Unable to assign type %s to variable %s with type %s",
-					type_to_string(expr_type, context.temp_allocator),
-					node.name,
-					type_to_string(declared_type, context.temp_allocator),
-				),
-			},
-		)
-	}
+	return decl
 }
 
 is_convertible_from_to :: proc(from: ^Type, to: ^Type) -> bool {
@@ -287,15 +529,6 @@ is_convertible_from_to :: proc(from: ^Type, to: ^Type) -> bool {
 
 unwrap_type :: proc(t: ^Type) -> ^Type {
 	return t
-	// t := t
-	// for {
-	// 	#partial switch type in t {
-	// 	case Alias_Type:
-	// 		t = type.core^
-	// 	case:
-	// 		return t
-	// 	}
-	// }
 }
 
 type_to_string :: proc(type: ^Type, allocator: runtime.Allocator) -> string {
@@ -336,22 +569,13 @@ write_type :: proc(type: ^Type, builder: ^strings.Builder) {
 	fmt.panicf("Very bad type %s", type)
 }
 
-// resolve_type :: proc(checker: ^Checker, name: string) -> (^Type, bool) {
-// 	#reverse for &scope in checker.scopes {
-// 		val, ok := &scope.types[name]
-// 		if ok do return val, true
-// 	}
-
-// 	return nil, false
-// }
-
-resolve_variable_type :: proc(checker: ^Checker, name: string) -> (^Type, bool) {
+checker_resolve_variable :: proc(checker: ^Checker, name: string) -> (^Checked_Declaration, bool) {
 	#reverse for scope in checker.scopes {
 		val, ok := scope.variables[name]
 		if ok do return val, true
 	}
 
-	return &invalid_type, false
+	return nil, false
 }
 
 evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
@@ -373,22 +597,22 @@ evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
 	case ^Function_Declaration_Node:
 		ret := evaluate_type(checker, variant.return_type)
 
-		params := make([]Parameter_Type, len(variant.parameters), checker.allocator)
+		params := make([]Parameter_Type, xar.len(variant.parameters), checker.allocator)
 		for &param, i in params {
-			param.name = variant.parameters[i].name
-			param.type = evaluate_type(checker, variant.parameters[i].type)
+			param.name = xar.get(&variant.parameters, i).name
+			param.type = evaluate_type(checker, xar.get(&variant.parameters, i).type)
 		}
 		return get_type(checker, Function_Type{parameters = params, ret = ret})
 	case ^Array_Type_Node:
-		length_type := check_expression(checker, variant.length, nil)
-		if !type_is_integer(length_type) {
+		length := check_expression(checker, variant.length, nil)
+		if !type_is_integer(length.type) {
 			append(
 				&checker.errors,
 				Type_Error {
 					type = .Bad_Conversion,
 					message = fmt.tprintf(
 						"Expected an integer length for an array, but recieved %s",
-						type_to_string(length_type, context.temp_allocator),
+						type_to_string(length.type, context.temp_allocator),
 					),
 				},
 			)
@@ -408,10 +632,10 @@ evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
 			return &invalid_type
 		}
 
-		length := variant.length.(^Integer_Node).value
+		length_val := variant.length.(^Integer_Node).value
 		// CONSIDER: 0-length arrays? that's probably fine?
 		//           but sizeless values are a bit odd
-		if length < 0 {
+		if length_val < 0 {
 			append(
 				&checker.errors,
 				Type_Error{type = .Bad_Value, message = "Array lengths cannot be negative"},
@@ -421,7 +645,7 @@ evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
 
 		elem_type := evaluate_type(checker, variant.elem)
 
-		return get_type(checker, Array_Type{elem_type = elem_type, length = int(length)})
+		return get_type(checker, Array_Type{elem_type = elem_type, length = int(length_val)})
 	}
 
 	append(
@@ -438,25 +662,24 @@ evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
 	return &invalid_type
 }
 
-check_expression :: proc(checker: ^Checker, node: Node, type_hint: Maybe(^Type)) -> ^Type {
+check_expression_statement :: proc(checker: ^Checker, node: Node) -> Checked_Statement {
+	stmt := checker_new(Checked_Expression_Statement, checker)
+
+	stmt.expr = check_expression(checker, node, nil)
+
+	return stmt
+}
+
+check_expression :: proc(
+	checker: ^Checker,
+	node: Node,
+	type_hint: Maybe(^Type),
+) -> Checked_Expression {
 	#partial switch type in node {
 	case ^Binary_Op_Node:
-		left := check_expression(checker, type.left, type_hint)
-		right := check_expression(checker, type.right, type_hint)
-		return check_binary_expression(checker, left, right, type.op)
+		return check_binary_expression(checker, type)
 	case ^Variable_Read_Node:
-		var_type, found := resolve_variable_type(checker, type.name)
-		if !found {
-			append(
-				&checker.errors,
-				Type_Error {
-					type = .Undeclared,
-					message = fmt.tprintf("Undeclared variable '%s'", type.name),
-				},
-			)
-			return &invalid_type
-		}
-		return var_type
+		return check_variable_read(checker, type)
 	case ^Compound_Node:
 		return check_compound(checker, type, type_hint)
 	case ^Call_Node:
@@ -464,24 +687,42 @@ check_expression :: proc(checker: ^Checker, node: Node, type_hint: Maybe(^Type))
 	case ^Index_Node:
 		return check_index(checker, type)
 	case ^String_Node:
-		return get_type(checker, Builtin_Type.String_Literal)
+		return {type = get_type(checker, Builtin_Type.String_Literal), variant = type}
 	case ^Integer_Node:
-		return get_type(checker, Builtin_Type.Integer_Literal)
+		return {type = get_type(checker, Builtin_Type.Integer_Literal), variant = type}
 	case ^Boolean_Node:
-		return get_type(checker, Builtin_Type.Bool_Literal)
+		return {type = get_type(checker, Builtin_Type.Bool_Literal), variant = type}
 	case:
 		fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(node))
 
 	}
 }
 
+check_variable_read :: proc(checker: ^Checker, node: ^Variable_Read_Node) -> Checked_Expression {
+	var, found := checker_resolve_variable(checker, node.name)
+	read := checker_new(Checked_Variable_Read, checker)
+	read.decl = var
+	expr := Checked_Expression{variant = read, type = &invalid_type}
+	if !found {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Undeclared,
+				message = fmt.tprintf("Undeclared variable '%s'", node.name),
+			},
+		)
+		return expr
+	}
+	expr.type = var.type
+	return expr
+}
+
 check_compound :: proc(
 	checker: ^Checker,
 	compound: ^Compound_Node,
 	type_hint: Maybe(^Type),
-) -> ^Type {
+) -> Checked_Expression {
 	target_type: ^Type
-
 
 	if compound.type != nil {
 		target_type = evaluate_type(checker, compound.type.?)
@@ -496,14 +737,17 @@ check_compound :: proc(
 			Type_Error{type = .Unknowable_Type, message = "This compound literal has no type."},
 		)
 
-		return &invalid_type
+		return invalid_expression
 	}
 
-	
-	
+
 	if type_is_array(target_type) {
+		array := checker_new(Array_Literal, checker)
+		expr := Checked_Expression{type = target_type, variant = array}
 		arr_type := target_type.(Array_Type)
-		if arr_type.length != len(compound.values) {
+		array.elem_type = arr_type.elem_type
+		xar.init(&array.body, checker.allocator)
+		if arr_type.length != xar.len(compound.values) {
 			append(
 				&checker.errors,
 				Type_Error {
@@ -511,23 +755,23 @@ check_compound :: proc(
 					message = fmt.tprintf(
 						"Wrong number of values for array literal! Expected %d but received %d",
 						arr_type.length,
-						len(compound.values),
+						xar.len(compound.values),
 					),
 				},
 			)
 		}
 
-		for expr in compound.values {
-			elem_type := check_expression(checker, expr, arr_type.elem_type)
-
-			if !is_convertible_from_to(elem_type, arr_type.elem_type) {
+		for iter := xar.iterator(&compound.values); expr in xar.iterate_by_val(&iter) {
+			elem := check_expression(checker, expr, arr_type.elem_type)
+			xar.append(&array.body, elem)
+			if !is_convertible_from_to(elem.type, arr_type.elem_type) {
 				append(
 					&checker.errors,
 					Type_Error {
 						type = .Bad_Conversion,
 						message = fmt.tprintf(
 							"Cannot convert from %s to %s",
-							type_to_string(elem_type, context.temp_allocator),
+							type_to_string(elem.type, context.temp_allocator),
 							type_to_string(arr_type.elem_type, context.temp_allocator),
 						),
 					},
@@ -535,7 +779,7 @@ check_compound :: proc(
 			}
 		}
 
-		return target_type
+		return expr
 	}
 
 	// FUTURE: Slices, Structs
@@ -549,7 +793,7 @@ check_compound :: proc(
 			),
 		},
 	)
-	return &invalid_type
+	return invalid_expression
 }
 
 type_is_array :: proc(t: ^Type) -> bool {
@@ -578,64 +822,75 @@ type_is_boolean :: proc(t: ^Type) -> bool {
 	return builtin == .Bool_Literal
 }
 
-check_index :: proc(checker: ^Checker, node: ^Index_Node) -> ^Type {
-	target_type := check_expression(checker, node.base, nil)
+check_index :: proc(checker: ^Checker, node: ^Index_Node) -> Checked_Expression {
+	array := check_expression(checker, node.base, nil)
 
-	if !type_is_array(target_type) {
+	checked_index := checker_new(Checked_Array_Index, checker)
+	checked_index.array = array
+	expr := Checked_Expression {
+		variant = checked_index,
+		type    = &invalid_type,
+	}
+
+	if !type_is_array(array.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Expected an array type for index expression, got %s",
-					type_to_string(target_type, context.temp_allocator),
+					type_to_string(array.type, context.temp_allocator),
 				),
 			},
 		)
-
-		return &invalid_type
+		return expr
 	}
 
-	arr_type := target_type.(Array_Type)
+	arr_type := array.type.(Array_Type)
 
-	index_type := check_expression(checker, node.index, nil)
-
-	if !type_is_integer(index_type) {
+	index := check_expression(checker, node.index, nil)
+	checked_index.index = index
+	if !type_is_integer(index.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Expected integer for index type, recieved %s",
-					type_to_string(index_type, context.temp_allocator),
+					type_to_string(index.type, context.temp_allocator),
 				),
 			},
 		)
 	}
 
-	return arr_type.elem_type
+	expr.type = arr_type.elem_type
+	return expr
 }
 
-check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
-	call_type := check_expression(checker, node.callee, nil)
+check_call :: proc(checker: ^Checker, node: ^Call_Node) -> Checked_Expression {
+	call := checker_new(Checked_Call, checker)
+	callee := check_expression(checker, node.callee, nil)
+	call.callee = callee
+	xar.init(&call.arguments, checker.allocator)
+	expr := Checked_Expression{variant = call, type = &invalid_type}
 
-	if !type_is_function(call_type) {
+	if !type_is_function(callee.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Expected a function type for call expression, got %s",
-					type_to_string(call_type, context.temp_allocator),
+					type_to_string(callee.type, context.temp_allocator),
 				),
 			},
 		)
 
-		return &invalid_type
+		return expr
 	}
 
-	func_type := call_type.(Function_Type)
-	if len(func_type.parameters) != len(node.arguments) {
+	func_type := callee.type.(Function_Type)
+	if len(func_type.parameters) != xar.len(node.arguments) {
 		append(
 			&checker.errors,
 			Type_Error {
@@ -643,26 +898,27 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
 				message = fmt.tprintf(
 					"Wrong number of arguments for call! Expected %d but received %d",
 					len(func_type.parameters),
-					len(node.arguments),
+					xar.len(node.arguments),
 				),
 			},
 		)
 
-		return &invalid_type
+		return expr
 	}
 
-	for i in 0 ..< len(node.arguments) {
+	for i in 0 ..< xar.len(node.arguments) {
 		param := func_type.parameters[i]
-		arg_type := check_expression(checker, node.arguments[i], param.type)
+		arg := check_expression(checker, xar.get(&node.arguments, i), param.type)
+		xar.append(&call.arguments, arg)
 
-		if !types_are_equivalent(arg_type, param.type) {
+		if !types_are_equivalent(arg.type, param.type) {
 			append(
 				&checker.errors,
 				Type_Error {
 					type = .Bad_Conversion,
 					message = fmt.tprintf(
 						"Unable to assign type %s to parameter %s with type %s",
-						type_to_string(arg_type, context.temp_allocator),
+						type_to_string(arg.type, context.temp_allocator),
 						param.name,
 						type_to_string(param.type, context.temp_allocator),
 					),
@@ -671,7 +927,9 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> ^Type {
 		}
 	}
 
-	return func_type.ret
+	expr.type = func_type.ret
+	
+	return expr
 }
 
 // Strict equivalence, no implicit conversions
@@ -748,26 +1006,46 @@ converts_to :: proc(t: ^Type, target: ^Type) -> bool {
 	return false
 }
 
-check_binary_expression :: proc(checker: ^Checker, left, right: ^Type, op: Token_Type) -> ^Type {
-	if type_is_integer(left) && type_is_integer(right) {
-		#partial switch op {
-		case .Plus, .Minus, .Star, .Slash:
-			return left
+check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Checked_Expression {
+	checked_node := checker_new(Checked_Binary_Op, checker)
+
+	left := check_expression(checker, node.left, nil)
+	right := check_expression(checker, node.right, left.type)
+	op := node.op
+
+	checked_node.left = left
+	checked_node.right = right
+	checked_node.op = op
+	expr := Checked_Expression {
+		variant = checked_node,
+	}
+
+	if type_is_integer(left.type) && type_is_integer(right.type) {
+		#partial switch node.op {
+		case .Addition, .Subtraction, .Multiplication, .Division:
+			expr.type = left.type
+			return expr
 		}
 	}
 
-	if type_is_boolean(left) && type_is_boolean(right) {
-		return get_type(checker, Builtin_Type.Bool_Literal)
+	if type_is_boolean(left.type) && type_is_boolean(right.type) {
+		expr.type = get_type(checker, Builtin_Type.Bool_Literal)
+		return expr
 	}
 
-	if types_are_equivalent(left, right) {
-		if op == .Double_Equals || op == .Exclamation_Equals {
-			return get_type(checker, Builtin_Type.Bool_Literal)
+	if types_are_equivalent(left.type, right.type) {
+		if op == .Equal_To || op == .Not_Equal_To {
+			expr.type = get_type(checker, Builtin_Type.Bool_Literal)
+			return expr
 		}
 
-		if type_is_integer(left) {
-			if op == .Less || op == .Greater || op == .Less_Equals || op == .Greater_Equals {
-				return get_type(checker, Builtin_Type.Bool_Literal)
+		if type_is_integer(left.type) {
+			if op == .Less_Than ||
+			   op == .Greater_Than ||
+			   op == .Less_Than_Or_Equal_To ||
+			   op == .Greater_Than_Or_Equal_To {
+				expr.type = get_type(checker, Builtin_Type.Bool_Literal)
+				return expr
 			}
 		}
 	}
@@ -780,12 +1058,13 @@ check_binary_expression :: proc(checker: ^Checker, left, right: ^Type, op: Token
 			message = fmt.tprintf(
 				"Unable to use operator %s on types %s and %s",
 				op,
-				type_to_string(left, context.temp_allocator),
-				type_to_string(right, context.temp_allocator),
+				type_to_string(left.type, context.temp_allocator),
+				type_to_string(right.type, context.temp_allocator),
 			),
 		},
 	)
-	return &invalid_type
+	expr.type = &invalid_type
+	return expr
 }
 
 make_type :: proc(
@@ -794,5 +1073,9 @@ make_type :: proc(
 ) -> ^T where intrinsics.type_is_variant_of(Type, ^T) {
 	type := new(T, checker.allocator)
 	return type
+}
+
+checker_new :: proc($T: typeid, checker: ^Checker) -> ^T {
+	return new(T, checker.allocator)
 }
 

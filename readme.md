@@ -19,7 +19,8 @@ I don't know much about where this'll go, but here're the plans
 - [x] Standard Functions
 - [x] Static Typing
 - [x] Type Inference
-- [ ] Arrays
+- [x] Arrays
+- [x] Internal improvements to support bytecode
 - [ ] Bytecode
 - [ ] For loops
 - [ ] Foreign Functions

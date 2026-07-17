@@ -1,5 +1,7 @@
+#+vet explicit-allocators
 package palladium
 
+import "core:container/xar"
 import "base:runtime"
 import "core:fmt"
 import "core:reflect"
@@ -18,10 +20,6 @@ Variable_Write_Node :: struct {
 	value: Node,
 }
 
-// Named_Type_Node :: struct {
-// 	name: string,
-// }
-
 Variable_Declaration_Node :: struct {
 	name:  string,
 	type:  Maybe(Node),
@@ -35,7 +33,7 @@ Parameter_Node :: struct {
 
 Function_Declaration_Node :: struct {
 	name:        string,
-	parameters:  []Parameter_Node,
+	parameters:  xar.Array(Parameter_Node, 2),
 	body:        Node,
 	return_type: Node,
 }
@@ -57,7 +55,7 @@ Variable_Read_Node :: struct {
 }
 
 Compound_Node :: struct {
-	values: []Node,
+	values: xar.Array(Node, 4),
 	type:   Maybe(Node),
 }
 
@@ -72,23 +70,23 @@ Index_Node :: struct {
 }
 
 Index_Write_Node :: struct {
-    target: ^Index_Node,
-    value: Node,
+	target: ^Index_Node,
+	value:  Node,
 }
 
 Binary_Op_Node :: struct {
 	left:  Node,
 	right: Node,
-	op:    Token_Type,
+	op:    Binary_Operation,
 }
 
 Unary_Op_Node :: struct {
 	node: Node,
-	op:   Token_Type,
+	op:   Prefix_Operation,
 }
 
 Block_Node :: struct {
-	statements: []Node,
+	statements: xar.Array(Node, 4),
 }
 
 Parser_Error_Type :: enum {
@@ -110,7 +108,7 @@ If_Node :: struct {
 	else_body: Maybe(Node),
 }
 
-// TODO: labels?
+// FUTURE: labels?
 Break_Node :: struct {}
 Continue_Node :: struct {}
 
@@ -125,7 +123,7 @@ While_Node :: struct {
 
 Call_Node :: struct {
 	callee:    Node,
-	arguments: []Node,
+	arguments: xar.Array(Node, 4),
 }
 
 Node :: union {
@@ -148,7 +146,26 @@ Node :: union {
 	^Array_Type_Node,
 	^Compound_Node,
 	^Index_Node,
-	^Index_Write_Node
+	^Index_Write_Node,
+}
+
+Binding_Power :: enum {
+	None = 0,
+	Equality_Left,
+	Equality_Right,
+	And_Left,
+	And_Right,
+	Or_Left,
+	Or_Right,
+	Comparison_Left,
+	Comparison_Right,
+	Binary_Plus_Minus_Left,
+	Binary_Plus_Minus_Right,
+	Binary_Mul_Div_Mod_Left,
+	Binary_Mul_Div_Mod_Right,
+	Unary_Plus_Minus,
+	Logical_Not,
+	Call,
 }
 
 parse_file :: proc(
@@ -176,14 +193,16 @@ parse_statement_list :: proc(
 	_node: Node,
 	_err: Maybe(Parser_Error),
 ) {
-	statements := make([dynamic]Node, p.allocator)
+	statements: xar.Array(Node, 4)
+	xar.array_init(&statements, p.allocator)
 	for !parser_match(p, until) {
 		statement := parse_statement(p) or_return
-		append(&statements, statement)
+		xar.append(&statements, statement)
 	}
 
 	node := make_node(p, Block_Node)
-	node.statements = statements[:]
+
+	node.statements = statements
 
 	return node, nil
 }
@@ -211,7 +230,7 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 		_ = parser_expect(p, .Return) or_return
 		val: Maybe(Node)
 		if !parser_match(p, .Semicolon) {
-			val = parse_expression(p) or_return
+			val = parse_expression(p, .None) or_return
 			_ = parser_expect(p, .Semicolon) or_return
 		}
 		node := make_node(p, Return_Node)
@@ -234,7 +253,7 @@ parse_type :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 
 	if token.type == .Open_Bracket {
 		// FUTURE: slices
-		length := parse_expression(p) or_return
+		length := parse_expression(p, .None) or_return
 		_ = parser_expect(p, .Close_Bracket) or_return
 		element := parse_type(p) or_return
 		node := make_node(p, Array_Type_Node)
@@ -243,14 +262,15 @@ parse_type :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 		return node, nil
 	}
 
-	return {}, Parser_Error{type = .Invalid_Value, message = fmt.aprintf("Token %s cannot begin a type", token.type)}
+	return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Token %s cannot begin a type", token.type)}
 }
 
 parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 	_ = parser_expect(p, .Function) or_return
 	name := parser_expect(p, .Identifier) or_return
 
-	parameters := make([dynamic]Parameter_Node, p.allocator)
+	parameters: xar.Array(Parameter_Node, 2)
+	xar.array_init(&parameters, p.allocator)
 
 	_ = parser_expect(p, .Open_Paren) or_return
 
@@ -258,7 +278,7 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 		name := parser_expect(p, .Identifier) or_return
 		_ = parser_expect(p, .Colon) or_return
 		type := parse_type(p) or_return
-		append(&parameters, Parameter_Node{name.value, type})
+		xar.append(&parameters, Parameter_Node{name.value, type})
 		if parser_match(p, .Close_Paren) {
 			break
 		}
@@ -275,7 +295,7 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 
 	node.body = body
 	node.name = name.value
-	node.parameters = parameters[:]
+	node.parameters = parameters
 	node.return_type = type
 
 	return node, nil
@@ -288,7 +308,7 @@ parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error
 		old_compound_rule := p.allow_compound_literal
 		defer p.allow_compound_literal = old_compound_rule
 		p.allow_compound_literal = false
-		condition = parse_expression(p) or_return
+		condition = parse_expression(p, .None) or_return
 	}
 
 	_ = parser_expect(p, .Open_Curly) or_return
@@ -324,7 +344,7 @@ parse_while_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Er
 		old_compound_rule := p.allow_compound_literal
 		defer p.allow_compound_literal = old_compound_rule
 		p.allow_compound_literal = false
-		condition = parse_expression(p) or_return
+		condition = parse_expression(p, .None) or_return
 	}
 
 	_ = parser_expect(p, .Open_Curly) or_return
@@ -348,7 +368,7 @@ parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 	}
 
 	_ = parser_expect(p, .Equals) or_return
-	value := parse_expression(p) or_return
+	value := parse_expression(p, .None) or_return
 	_ = parser_expect(p, .Semicolon) or_return
 
 	node := make_node(p, Variable_Declaration_Node)
@@ -360,10 +380,10 @@ parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 }
 
 parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
-	expr := parse_expression(p) or_return
+	expr := parse_expression(p, .None) or_return
 
 	if parser_match(p, .Equals) {
-		value := parse_expression(p) or_return
+		value := parse_expression(p, .None) or_return
 
 		#partial switch type in expr {
 		case ^Variable_Read_Node:
@@ -372,7 +392,7 @@ parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 			node.value = value
 			expr = node
 		case ^Index_Node:
-		    node := make_node(p, Index_Write_Node)
+			node := make_node(p, Index_Write_Node)
 			node.target = type
 			node.value = value
 			expr = node
@@ -386,7 +406,7 @@ parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 		.Slash_Equals,
 		.Star_Equals,
 	); ok {
-		rhs := parse_expression(p) or_return
+		rhs := parse_expression(p, .None) or_return
 
 		mutating_node := make_node(p, Binary_Op_Node)
 		mutating_node.left = expr
@@ -394,13 +414,13 @@ parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 
 		#partial switch op {
 		case .Plus_Equals:
-			mutating_node.op = .Plus
+			mutating_node.op = .Addition
 		case .Minus_Equals:
-			mutating_node.op = .Minus
+			mutating_node.op = .Subtraction
 		case .Star_Equals:
-			mutating_node.op = .Star
+			mutating_node.op = .Multiplication
 		case .Slash_Equals:
-			mutating_node.op = .Slash
+			mutating_node.op = .Division
 		case:
 			fmt.panicf("Unhandled mutating assignment operator '%s'", op)
 		}
@@ -425,154 +445,221 @@ make_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 	return new(T, p.allocator)
 }
 
-// Alias for the lowest-precedence expression
-parse_expression :: parse_equality
-
-parse_equality :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_and(p) or_return
-
-	for op in parser_match_any(p, .Double_Equals, .Exclamation_Equals) {
-		right := parse_and(p) or_return
-		new_node := make_node(p, Binary_Op_Node)
-		new_node.left = left
-		new_node.right = right
-		new_node.op = op
-		left = new_node
+is_binary_op :: proc(tt: Token_Type) -> bool {
+	@(static, rodata)
+	binops := bit_set[Token_Type] {
+		.Plus,
+		.Minus,
+		.Star,
+		.Slash,
+		.Less,
+		.Less_Equals,
+		.Greater,
+		.Greater_Equals,
+		.Double_Equals,
+		.Exclamation_Equals,
+		.Double_Pipe,
+		.Double_Amp,
 	}
 
-
-	return left, nil
+	return tt in binops
 }
 
-parse_or :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_compare(p) or_return
+is_prefix_op :: proc(tt: Token_Type) -> bool {
+	@(static, rodata)
+	preops := bit_set[Token_Type]{.Plus, .Minus, .Exclamation_Point}
 
-	for op in parser_match_any(p, .Double_Pipe) {
-		right := parse_compare(p) or_return
-		new_node := make_node(p, Binary_Op_Node)
-		new_node.left = left
-		new_node.right = right
-		new_node.op = op
-		left = new_node
+	return tt in preops
+}
+
+Binary_Operation :: enum {
+	Invalid = 0,
+	Addition,
+	Subtraction,
+	Multiplication,
+	Division,
+	Less_Than,
+	Less_Than_Or_Equal_To,
+	Greater_Than,
+	Greater_Than_Or_Equal_To,
+	Equal_To,
+	Not_Equal_To,
+	Logical_And,
+	Logical_Or,
+}
+
+Prefix_Operation :: enum {
+	Invalid = 0,
+	Nothingation, // +x does nothing
+	Negation,
+	Logical_Not,
+}
+
+binary_op_types := #partial [Token_Type]Binary_Operation {
+	.Plus               = .Addition,
+	.Minus              = .Subtraction,
+	.Star               = .Multiplication,
+	.Slash              = .Division,
+	.Less               = .Less_Than,
+	.Less_Equals        = .Less_Than_Or_Equal_To,
+	.Greater            = .Greater_Than,
+	.Greater_Equals     = .Greater_Than_Or_Equal_To,
+	.Double_Equals      = .Equal_To,
+	.Exclamation_Equals = .Not_Equal_To,
+	.Double_Pipe        = .Logical_Or,
+	.Double_Amp         = .Logical_And,
+}
+
+prefix_op_types := #partial [Token_Type]Prefix_Operation {
+	.Plus              = .Nothingation,
+	.Minus             = .Negation,
+	.Exclamation_Point = .Logical_Not,
+}
+
+binary_operator_bp :: proc(op: Binary_Operation) -> (Binding_Power, Binding_Power) {
+	switch op {
+	case .Invalid:
+		panic("Invalid operator")
+	case .Addition, .Subtraction:
+		return .Binary_Plus_Minus_Left, .Binary_Plus_Minus_Right
+	case .Multiplication, .Division:
+		return .Binary_Mul_Div_Mod_Left, .Binary_Mul_Div_Mod_Right
+	case .Less_Than, .Less_Than_Or_Equal_To, .Greater_Than, .Greater_Than_Or_Equal_To:
+		return .Comparison_Left, .Comparison_Right
+	case .Equal_To, .Not_Equal_To:
+		return .Equality_Left, .Equality_Right
+	case .Logical_Or:
+		return .Or_Left, .Or_Right
+	case .Logical_And:
+		return .And_Left, .And_Right
 	}
-
-	return left, nil
+	panic("Invalid operator")
 }
 
-parse_compare :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_add(p) or_return
-
-	for op in parser_match_any(p, .Less, .Less_Equals, .Greater, .Greater_Equals) {
-		right := parse_add(p) or_return
-		new_node := make_node(p, Binary_Op_Node)
-		new_node.left = left
-		new_node.right = right
-		new_node.op = op
-		left = new_node
+prefix_precedence :: proc(t: Prefix_Operation) -> Binding_Power {
+	switch t {
+	case .Invalid:
+		panic("Invalid operator")
+	case .Negation, .Nothingation:
+		return .Unary_Plus_Minus
+	case .Logical_Not:
+		return .Logical_Not
 	}
-
-	return left, nil
+	panic("Invalid operator")
 }
 
-parse_and :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_or(p) or_return
-
-	for op in parser_match_any(p, .Double_Amp) {
-		right := parse_or(p) or_return
-		new_node := make_node(p, Binary_Op_Node)
-		new_node.left = left
-		new_node.right = right
-		new_node.op = op
-		left = new_node
-	}
-
-	return left, nil
-}
-
-parse_add :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_mul(p) or_return
-
-	for op in parser_match_any(p, .Plus, .Minus) {
-		right := parse_mul(p) or_return
-		new_node := make_node(p, Binary_Op_Node)
-		new_node.left = left
-		new_node.right = right
-		new_node.op = op
-		left = new_node
-	}
-
-	return left, nil
-}
-
-parse_mul :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	left := parse_unary(p) or_return
-
-	for op in parser_match_any(p, .Star, .Slash) {
-		right := parse_unary(p) or_return
-		new_node := make_node(p, Binary_Op_Node)
-		new_node.left = left
-		new_node.right = right
-		new_node.op = op
-		left = new_node
-	}
-
-	return left, nil
-}
-
-parse_unary :: proc(p: ^Parser) -> (node: Node, err: Maybe(Parser_Error)) {
-	if op, matched := parser_match_any(p, .Exclamation_Point); matched {
-		underlying_node := parse_unary(p) or_return
-
-		node := make_node(p, Unary_Op_Node)
-		node.node = underlying_node
-		node.op = op
-
-		return node, nil
-	} else {
-		return parse_unary_postfix(p)
-	}
-}
-
-parse_unary_postfix :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
-	node := parse_value(p) or_return
+parse_expression :: proc(
+	p: ^Parser,
+	min_bp: Binding_Power,
+) -> (
+	_node: Node,
+	_err: Maybe(Parser_Error),
+) {
+	lhs := parse_prefix(p, min_bp) or_return
 
 	for {
-		if parser_match(p, .Open_Paren) {
-			arguments := make([dynamic]Node, p.allocator)
-
-			old_allow_compound := p.allow_compound_literal
-			defer p.allow_compound_literal = old_allow_compound
-			p.allow_compound_literal = true
-			for !parser_match(p, .Close_Paren) {
-				name := parse_expression(p) or_return
-				append(&arguments, name)
-				if parser_match(p, .Close_Paren) {
-					break
-				}
-				_ = parser_expect(p, .Comma) or_return
-			}
-
-			new_node := make_node(p, Call_Node)
-			new_node.arguments = arguments[:]
-			new_node.callee = node
-
-			node = new_node
-		} else if parser_match(p, .Open_Bracket) {
-			old_allow_compound := p.allow_compound_literal
-			defer p.allow_compound_literal = old_allow_compound
-			p.allow_compound_literal = true
-			index := parse_expression(p) or_return
-			_ = parser_expect(p, .Close_Bracket) or_return
-			new_node := make_node(p, Index_Node)
-			new_node.base = node
-			new_node.index = index
-			node = new_node
-		} else {
+		op_token := parser_current(p)
+		if !is_binary_op(op_token.type) {
 			break
 		}
+
+		operator := binary_op_types[op_token.type]
+		left_bp, right_bp := binary_operator_bp(operator)
+		if left_bp < min_bp {
+			break
+		}
+		parser_advance(p)
+		rhs := parse_expression(p, right_bp) or_return
+		new_left := make_node(p, Binary_Op_Node)
+		new_left.left = lhs
+		new_left.right = rhs
+		new_left.op = operator
+		lhs = new_left
 	}
 
-	return node, nil
+	return lhs, nil
+}
+
+parse_prefix :: proc(p: ^Parser, bp: Binding_Power) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	tok := parser_current(p)
+	lhs: Node
+
+	if is_prefix_op(tok.type) {
+		parser_advance(p)
+		op := prefix_op_types[tok.type]
+		op_prec := prefix_precedence(op)
+		rhs := parse_expression(p, op_prec) or_return
+		node := make_node(p, Unary_Op_Node)
+		node.op = op
+		node.node = rhs
+		lhs = node
+	} else {
+		lhs = parse_value(p) or_return
+	}
+
+	return parse_postfix(p, lhs, bp)
+}
+
+parse_postfix :: proc(
+	p: ^Parser,
+	lhs: Node,
+	bp: Binding_Power,
+) -> (
+	_node: Node,
+	_err: Maybe(Parser_Error),
+) {
+	lhs := lhs
+
+	for {
+		tok := parser_current(p)
+		#partial switch tok.type {
+		case .Open_Paren:
+			lhs = parse_call(p, lhs) or_return
+		case .Open_Bracket:
+		    lhs = parse_index(p, lhs) or_return
+		case:
+			return lhs, nil
+		}
+	}
+}
+
+parse_index :: proc(p: ^Parser, base: Node) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .Open_Bracket) or_return
+	old_allow_compound := p.allow_compound_literal
+	defer p.allow_compound_literal = old_allow_compound
+	p.allow_compound_literal = true
+	
+	index := parse_expression(p, .None) or_return
+	_ = parser_expect(p, .Close_Bracket) or_return
+
+	new_node := make_node(p, Index_Node)
+	new_node.index = index
+	new_node.base = base
+
+	return new_node, nil
+}
+
+parse_call :: proc(p: ^Parser, callee: Node) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .Open_Paren) or_return
+	arguments: xar.Array(Node, 4)
+	xar.array_init(&arguments, p.allocator)
+	old_allow_compound := p.allow_compound_literal
+	defer p.allow_compound_literal = old_allow_compound
+	p.allow_compound_literal = true
+	for !parser_match(p, .Close_Paren) {
+		name := parse_expression(p, .None) or_return
+		xar.append(&arguments, name)
+		if parser_match(p, .Close_Paren) {
+			break
+		}
+		_ = parser_expect(p, .Comma) or_return
+	}
+
+	new_node := make_node(p, Call_Node)
+	new_node.arguments = arguments
+	new_node.callee = callee
+
+	return new_node, nil
 }
 
 // leaks on error. use an arena or be okay with leaks
@@ -655,7 +742,7 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 		}
 	case .Open_Bracket:
 		// FUTURE: slices
-		length := parse_expression(p) or_return
+		length := parse_expression(p, .None) or_return
 		_ = parser_expect(p, .Close_Bracket) or_return
 		elem_type := parse_type(p) or_return
 		if !p.allow_compound_literal {
@@ -673,22 +760,23 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 		old_allow_compound := p.allow_compound_literal
 		defer p.allow_compound_literal = old_allow_compound
 		p.allow_compound_literal = true
-		expr := parse_expression(p) or_return
+		expr := parse_expression(p, .None) or_return
 		_ = parser_expect(p, .Close_Paren) or_return
 		return expr, nil
 	case .Open_Curly:
 		return parse_compound(p)
 	}
 
-	return {}, Parser_Error{type = .Invalid_Value, message = fmt.aprintf("Token %s has no value", tok.type)}
+	return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Token %s has no value", tok.type)}
 }
 
 parse_compound :: proc(p: ^Parser) -> (_e: Node, _r: Maybe(Parser_Error)) {
-	expressions := make([dynamic]Node, p.allocator)
+	expressions: xar.Array(Node, 4)
+	xar.init(&expressions, p.allocator)
 
 	for !parser_match(p, .Close_Curly) {
-		expr := parse_expression(p) or_return
-		append(&expressions, expr)
+		expr := parse_expression(p, .None) or_return
+		xar.append(&expressions, expr)
 		if parser_match(p, .Close_Curly) {
 			break
 		}
@@ -697,7 +785,7 @@ parse_compound :: proc(p: ^Parser) -> (_e: Node, _r: Maybe(Parser_Error)) {
 
 	node := make_node(p, Compound_Node)
 	node.type = nil
-	node.values = expressions[:]
+	node.values = expressions
 
 	return node, nil
 }

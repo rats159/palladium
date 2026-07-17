@@ -67,6 +67,7 @@ get_type :: proc(checker: ^Checker, t: Type) -> ^Type {
 }
 
 hash_type :: proc(t: Type, loc := #caller_location) -> Type_Hash {
+    t := t
 	switch &type in t {
 	case Builtin_Type:
 		return auto_cast hash.fnv64a(bytesof(&type))

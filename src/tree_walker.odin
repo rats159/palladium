@@ -1,5 +1,6 @@
 package palladium
 
+import "core:container/xar"
 import "core:log"
 import "core:fmt"
 import "core:reflect"
@@ -41,8 +42,8 @@ Runtime_Error :: struct {
 }
 
 Function :: struct {
-	parameters: []Parameter_Node,
-	body:       Node,
+	parameters: xar.Array(^Checked_Declaration, 2),
+	body:       Checked_Statement,
 }
 
 Continue :: struct {}
@@ -85,11 +86,12 @@ read_variable :: proc(rt: ^Runtime, name: string) -> (_val: Value, _err: Runtime
 	return var^, nil
 }
 
-execute_file :: proc(rt: ^Runtime, file: Node) -> Maybe(Runtime_Error) {
+execute_file :: proc(rt: ^Runtime, file: Checked_Program) -> Maybe(Runtime_Error) {
+	file := file
 	// no pop so we can read variables in tests
 	push_scope(rt)
 
-	for statement in file.(^Block_Node).statements {
+	for iter := xar.iterator(&file.statements); statement in xar.iterate_by_val(&iter) {
 		res := execute_statement(rt, statement)
 		switch type in res {
 		case Runtime_Error:
@@ -116,33 +118,27 @@ execute_file :: proc(rt: ^Runtime, file: Node) -> Maybe(Runtime_Error) {
 }
 
 @(require_results)
-execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation {
+execute_statement :: proc(rt: ^Runtime, statement: Checked_Statement) -> Runtime_Propagation {
 	#partial switch type in statement {
-	case ^Variable_Declaration_Node:
+	case ^Checked_Declaration:
 		declare_variable(rt, type) or_return
-	case ^Block_Node:
-		push_scope(rt)
-		defer pop_scope(rt)
-		for stmt in type.statements {
-			execute_statement(rt, stmt) or_return
-		}
-	case ^Variable_Write_Node:
+	case ^Checked_Block:
+		execute_block(rt, type) or_return
+	case ^Checked_Variable_Write:
 		write_variable(rt, type) or_return
-	case ^Index_Write_Node:
+	case ^Checked_Index_Write:
 	    write_index(rt, type) or_return
-	case ^If_Node:
+	case ^Checked_If:
 		execute_if(rt, type) or_return
-	case ^While_Node:
+	case ^Checked_Loop:
 		execute_while(rt, type) or_return
-	case ^Break_Node:
+	case ^Checked_Break:
 		return Break{}
-	case ^Continue_Node:
+	case ^Checked_Continue:
 		return Continue{}
-	case ^Function_Declaration_Node:
-		declare_function(rt, type) or_return
-	case ^Return_Node:
+	case ^Checked_Return:
 		ret: Return
-		if node, ok := type.value.?; ok {
+		if node, ok := type.val.?; ok {
 			ret.val = evaluate_expression(rt, node) or_return
 		}
 
@@ -151,6 +147,15 @@ execute_statement :: proc(rt: ^Runtime, statement: Node) -> Runtime_Propagation 
 		fmt.panicf("Impossible statement type '%s'", reflect.union_variant_typeid(statement))
 	}
 
+	return nil
+}
+
+execute_block :: proc(rt: ^Runtime, block: ^Checked_Block) -> Runtime_Propagation {
+	push_scope(rt)
+	defer pop_scope(rt)
+	for iter := xar.iterator(&block.statements); stmt in xar.iterate_by_val(&iter) {
+		execute_statement(rt, stmt) or_return
+	}
 	return nil
 }
 
@@ -164,25 +169,9 @@ pop_scope :: proc(rt: ^Runtime) {
 	delete(scope)
 }
 
-declare_function :: proc(rt: ^Runtime, stmt: ^Function_Declaration_Node) -> Runtime_Propagation {
-	scope := &rt.scopes[len(rt.scopes) - 1]
-
-	if stmt.name in scope {
-		return Runtime_Error {
-			type = .Redeclared_Variable,
-			message = fmt.tprintf("Redeclared variable '%s'", stmt.name),
-		}
-	}
-	scope[stmt.name] = Function {
-		body       = stmt.body,
-		parameters = stmt.parameters,
-	}
-
-	return nil
-}
-
-declare_variable :: proc(rt: ^Runtime, stmt: ^Variable_Declaration_Node) -> Runtime_Propagation {
-	val := evaluate_expression(rt, stmt.value) or_return
+declare_variable :: proc(rt: ^Runtime, stmt: ^Checked_Declaration) -> Runtime_Propagation {
+	// TODO: zero initialize
+	val := evaluate_expression(rt, stmt.value.?) or_return
 
 	scope := &rt.scopes[len(rt.scopes) - 1]
 
@@ -211,7 +200,7 @@ declare_parameter :: proc(rt: ^Runtime, name: string, value: Value) -> Runtime_P
 	return nil
 }
 
-execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Runtime_Propagation {
+execute_while :: proc(rt: ^Runtime, stmt: ^Checked_Loop) -> Runtime_Propagation {
 
 	loop: for {
 		cond_node := evaluate_expression(rt, stmt.condition) or_return
@@ -232,7 +221,7 @@ execute_while :: proc(rt: ^Runtime, stmt: ^While_Node) -> Runtime_Propagation {
 	return nil
 }
 
-execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Runtime_Propagation {
+execute_if :: proc(rt: ^Runtime, stmt: ^Checked_If) -> Runtime_Propagation {
 	cond_value := evaluate_expression(rt, stmt.condition) or_return
 	cond := unwrap_value(cond_value, bool) or_return
 
@@ -246,93 +235,86 @@ execute_if :: proc(rt: ^Runtime, stmt: ^If_Node) -> Runtime_Propagation {
 }
 
 @(require_results)
-write_index :: proc(rt: ^Runtime, node: ^Index_Write_Node) -> Runtime_Propagation {
-    target := evaluate_expression(rt, node.target.base) or_return
+write_index :: proc(rt: ^Runtime, node: ^Checked_Index_Write) -> Runtime_Propagation {
+    target := evaluate_expression(rt, node.target.variant.(^Checked_Array_Index).array) or_return
 	arr := unwrap_value(target, Array) or_return
 	assert(arr.data != nil, "nil array data")
    
-	index_expr := evaluate_expression(rt, node.target.index) or_return
+	index_expr := evaluate_expression(rt, node.target.variant.(^Checked_Array_Index).index) or_return
 	index := unwrap_value(index_expr, i64) or_return
    
 	if index < 0 || index >= arr.length {
 		return Runtime_Error{type = .Out_Of_Bounds_Index, message = fmt.tprintf("Index %d is out of bounds for array of length %d", index, arr.length)}
 	}
    
-	arr.data[index] = evaluate_expression(rt, node.value) or_return
+	arr.data[index] = evaluate_expression(rt, node.new_value) or_return
 
 	return nil
 }
 
 @(require_results)
-write_variable :: proc(rt: ^Runtime, node: ^Variable_Write_Node) -> Runtime_Propagation {
-	var := resolve_variable(rt, node.name)
+write_variable :: proc(rt: ^Runtime, node: ^Checked_Variable_Write) -> Runtime_Propagation {
+	var := resolve_variable(rt, node.target.name)
 
 	if var == nil {
 		return Runtime_Error {
 			type = .Undeclared_Variable,
-			message = fmt.tprintf("Undeclared variable '%s'", node.name),
+			message = fmt.tprintf("Undeclared variable '%s'", node.target.name),
 		}
 	}
 
-	var^ = evaluate_expression(rt, node.value) or_return
+	var^ = evaluate_expression(rt, node.new_value) or_return
 
 	return nil
 }
 
-evaluate_expression :: proc(rt: ^Runtime, expr: Node) -> (Value, Runtime_Propagation) {
-	#partial switch type in expr {
-	case ^Binary_Op_Node:
+evaluate_expression :: proc(rt: ^Runtime, expr: Checked_Expression) -> (Value, Runtime_Propagation) {
+	#partial switch type in expr.variant {
+	case ^Checked_Binary_Op:
 		return evaluate_binary_expression(rt, type)
 	case ^Integer_Node:
 		return type.value, nil
 	case ^Boolean_Node:
 		return type.value, nil
-	case ^Variable_Read_Node:
-		return read_variable(rt, type.name)
+	case ^Checked_Variable_Read:
+		return read_variable(rt, type.decl.name)
 	case ^String_Node:
 		return type.value, nil
-	case ^Call_Node:
+	case Function:
+		return type, nil
+	case ^Checked_Call:
 		return call_function(rt, type)
-	case ^Index_Node:
+	case ^Checked_Array_Index:
 		return evaluate_index(rt, type)
-	case ^Compound_Node:
-	    return evaluate_compound(rt, type)
+	case ^Array_Literal:
+	    return evaluate_array_literal(rt, type)
 	}
 
-	fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(expr))
+	fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(expr.variant))
 }
 
 // FUTURE: try avoiding using types at runtime
 //         maybe swap out the AST nodes in type checking?
 //         array lengths could also be reduced to integers that way
-evaluate_compound :: proc(rt: ^Runtime, expr: ^Compound_Node) -> (_v: Value, _e: Runtime_Propagation) {
-    assert(expr.type != nil, "Compounds need types at runtime")
-    #partial switch t in expr.type.? {
-        case ^Array_Type_Node:
-            length_expr := evaluate_expression(rt, t.length) or_return
-            length := unwrap_value(length_expr, i64) or_return
-            // FUTURE: this always leaks. probably 
-            //         okay for now, but needs 
-            //         fixing for bytecode
-            values := make([^]Value, length)
+evaluate_array_literal :: proc(rt: ^Runtime, expr: ^Array_Literal) -> (_v: Value, _e: Runtime_Propagation) {
+    length := xar.len(expr.body)
+    // FUTURE: this always leaks. probably 
+    //         okay for now, but needs 
+    //         fixing for bytecode
+    values := make([^]Value, length)
 
-            assert(length == i64(len(expr.values)), "bad thing type checker skipped")
-
-            for elem, i in expr.values {
-                values[i] = evaluate_expression(rt, elem) or_return
-            }
-            
-            return Array {
-                data = values,
-                length = length
-            }, nil
-        case:
-            fmt.panicf("Impossible compound type '%s'", reflect.union_variant_typeid(expr.type.?))
+    for iter := xar.iterator(&expr.body); elem, i in xar.iterate_by_val(&iter) {
+        values[i] = evaluate_expression(rt, elem) or_return
     }
+    
+    return Array {
+        data = values,
+        length = i64(length)
+    }, nil
 }
 
-evaluate_index :: proc(rt: ^Runtime, expr: ^Index_Node) -> (_val: Value, _ret: Runtime_Propagation) {
-	target := evaluate_expression(rt, expr.base) or_return
+evaluate_index :: proc(rt: ^Runtime, expr: ^Checked_Array_Index) -> (_val: Value, _ret: Runtime_Propagation) {
+	target := evaluate_expression(rt, expr.array) or_return
 	arr := unwrap_value(target, Array) or_return
 	assert(arr.data != nil, "nil array data")
 
@@ -346,19 +328,19 @@ evaluate_index :: proc(rt: ^Runtime, expr: ^Index_Node) -> (_val: Value, _ret: R
 	return arr.data[index], nil
 }
 
-call_function :: proc(rt: ^Runtime, call: ^Call_Node) -> (_val: Value, _ret: Runtime_Propagation) {
+call_function :: proc(rt: ^Runtime, call: ^Checked_Call) -> (_val: Value, _ret: Runtime_Propagation) {
 	callee := evaluate_expression(rt, call.callee) or_return
 	function := unwrap_value(callee, Function) or_return
 
-	if len(function.parameters) != len(call.arguments) {
-		return {}, Runtime_Error{type = .Bad_Call, message = fmt.tprintf("Bad argument count for function. Expected %d but recieved %d", len(function.parameters), len(call.arguments))}
+	if xar.len(function.parameters) != xar.len(call.arguments) {
+		return {}, Runtime_Error{type = .Bad_Call, message = fmt.tprintf("Bad argument count for function. Expected %d but recieved %d", xar.len(function.parameters), xar.len(call.arguments))}
 	}
 
 	push_scope(rt)
 	defer pop_scope(rt)
 
-	for arg, i in call.arguments {
-		name := function.parameters[i]
+	for iter := xar.iterator(&call.arguments); arg, i in xar.iterate_by_val(&iter) {
+		name := xar.get(&function.parameters, i)
 		value := evaluate_expression(rt, arg) or_return
 		declare_parameter(rt, name.name, value) or_return
 	}
@@ -373,14 +355,14 @@ call_function :: proc(rt: ^Runtime, call: ^Call_Node) -> (_val: Value, _ret: Run
 
 evaluate_short_circuiting_binary_expression :: proc(
 	rt: ^Runtime,
-	expr: ^Binary_Op_Node,
+	expr: ^Checked_Binary_Op,
 ) -> (
 	_val: Value,
 	_err: Runtime_Propagation,
 ) {
 	left := evaluate_expression(rt, expr.left) or_return
 	#partial switch expr.op {
-	case .Double_Pipe:
+	case .Logical_Or:
 		left := unwrap_value(left, bool) or_return
 
 		if left do return true, nil
@@ -391,7 +373,7 @@ evaluate_short_circuiting_binary_expression :: proc(
 		if right_raw do return true, nil
 
 		return false, nil
-	case .Double_Amp:
+	case .Logical_And:
 		left := unwrap_value(left, bool) or_return
 
 		if !left do return false, nil
@@ -409,7 +391,7 @@ evaluate_short_circuiting_binary_expression :: proc(
 
 evaluate_binary_expression :: proc(
 	rt: ^Runtime,
-	expr: ^Binary_Op_Node,
+	expr: ^Checked_Binary_Op,
 ) -> (
 	_val: Value,
 	_err: Runtime_Propagation,
@@ -423,7 +405,7 @@ evaluate_binary_expression :: proc(
 
 evaluate_regular_binary_expression :: proc(
 	rt: ^Runtime,
-	expr: ^Binary_Op_Node,
+	expr: ^Checked_Binary_Op,
 ) -> (
 	_val: Value,
 	_err: Runtime_Propagation,
@@ -431,39 +413,39 @@ evaluate_regular_binary_expression :: proc(
 	left := evaluate_expression(rt, expr.left) or_return
 	right := evaluate_expression(rt, expr.right) or_return
 	#partial switch expr.op {
-	case .Plus:
+	case .Addition:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left + right, nil
-	case .Minus:
+	case .Subtraction:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left - right, nil
-	case .Star:
+	case .Multiplication:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left * right, nil
-	case .Slash:
+	case .Division:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left / right, nil
-	case .Double_Equals:
+	case .Equal_To:
 		return values_equal(left, right)
-	case .Exclamation_Equals:
+	case .Not_Equal_To:
 		return !(values_equal(left, right) or_return), nil
-	case .Less:
+	case .Less_Than:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left < right, nil
-	case .Greater:
+	case .Greater_Than:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left > right, nil
-	case .Less_Equals:
+	case .Less_Than_Or_Equal_To:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left <= right, nil
-	case .Greater_Equals:
+	case .Greater_Than_Or_Equal_To:
 		left := unwrap_value(left, i64) or_return
 		right := unwrap_value(right, i64) or_return
 		return left >= right, nil
@@ -527,9 +509,9 @@ values_equal :: proc(a, b: Value) -> (_eq: bool, _err: Runtime_Propagation) {
 	fmt.panicf("Impossible value type %s", a_type)
 }
 
-short_circuits :: proc(op: Token_Type) -> bool {
+short_circuits :: proc(op: Binary_Operation) -> bool {
 	#partial switch op {
-	case .Double_Pipe, .Double_Amp:
+	case .Logical_Or, .Logical_And:
 		return true
 	case:
 		return false
