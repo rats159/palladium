@@ -345,7 +345,7 @@ test_redeclared_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x = 10; var x = 20;`, context.temp_allocator)
 	expect_nil(t, err)
 
-	errs := check_program(ast, context.temp_allocator)
+	_, errs := check_program(ast, context.temp_allocator)
 	testing.expect_value(t, len(errs), 1)
 	testing.expect_value(t, errs[0].type, Checker_Error_Type.Redeclaration)
 }
@@ -355,7 +355,7 @@ test_expect_type_error :: proc(t: ^testing.T) {
 	ast, err := parse_file(`var x = "abc" - "def";`, context.temp_allocator)
 	expect_nil(t, err)
 
-	checker_errors := check_program(ast, context.temp_allocator)
+	_, checker_errors := check_program(ast, context.temp_allocator)
 
 	testing.expect_value(t, len(checker_errors), 2)
 	testing.expect_value(t, checker_errors[0].type, Checker_Error_Type.Bad_Operator) // string - string is disallowed
@@ -627,13 +627,13 @@ test_if_tokenizing :: proc(t: ^testing.T) {
 
 @(test)
 test_if_parsing :: proc(t: ^testing.T) {
-	p := make_parser("if true { var a = 5; } else { var b = 10; }")
-	ast, err := parse_statement(&p)
+	ast, err := parse_file("if true { var a = 5; } else { var b = 10; }", context.temp_allocator)
 	expect_nil(t, err)
 
 	expect_fine_types(t, ast)
 
-	_if := expect_and_unwrap(t, ast, ^If_Node)
+	body := expect_and_unwrap(t, ast, ^Block_Node)
+	_if := expect_and_unwrap(t, xar.get(&body.statements, 0), ^If_Node)
 	_ = expect_and_unwrap(t, _if.body, ^Block_Node)
 	_ = expect_and_unwrap(t, _if.condition, ^Boolean_Node)
 	_ = expect_and_unwrap(t, _if.else_body.?, ^Block_Node)
@@ -771,8 +771,7 @@ test_scoping :: proc(t: ^testing.T) {
 	expect_nil(t, err)
 
 	// expect_fine_types(t, ast)
-
-	errs := check_program(ast, context.temp_allocator)
+	_, errs := check_program(ast, context.temp_allocator)
 	testing.expect_value(t, len(errs), 2)
 	testing.expect_value(t, errs[0].type, Checker_Error_Type.Undeclared) // Y isn't in the outer scope
 	testing.expect_value(t, errs[1].type, Checker_Error_Type.Bad_Conversion) // Invalid type
@@ -983,7 +982,7 @@ test_type_disagreement :: proc(t: ^testing.T) {
 	)
 	expect_nil(t, err)
 
-	errs := check_program(ast, context.temp_allocator)
+	_, errs := check_program(ast, context.temp_allocator)
 	// x is still treated as int, despite assignment failure
 	//  so the rest of the program is fine
 	testing.expect_value(t, len(errs), 1)
@@ -1006,7 +1005,7 @@ test_compound_types_failing :: proc(t: ^testing.T) {
     ast, err := parse_file("var x = {1, 2, 3, 4};", context.temp_allocator)
     expect_nil(t, err)
 
-   	type_errs := check_program(ast, context.temp_allocator)
+   	_, type_errs := check_program(ast, context.temp_allocator)
     testing.expect_value(t, len(type_errs), 2)
     testing.expect_value(t, type_errs[0].type, Checker_Error_Type.Unknowable_Type) // no types
     testing.expect_value(t, type_errs[1].type, Checker_Error_Type.Bad_Conversion) // invalid -> invalid
@@ -1033,7 +1032,7 @@ test_compound_types_length_mismatch :: proc(t: ^testing.T) {
     ast, err := parse_file("var x: [4]int = {1, 2, 3, 4, 5};", context.temp_allocator)
     expect_nil(t, err)
 
-    errs := check_program(ast, context.temp_allocator)
+    _, errs := check_program(ast, context.temp_allocator)
     testing.expect_value(t, len(errs), 1)
     testing.expect_value(t, errs[0].type, Checker_Error_Type.Wrong_Argument_Count) // 5 items to a [4]int
 }
@@ -1265,7 +1264,7 @@ expect_values_equal :: proc(
 
 @(private = "file")
 expect_fine_types :: proc(t: ^testing.T, node: Node, loc := #caller_location) {
-	errs := check_program(node, context.temp_allocator)
+	_, errs := check_program(node, context.temp_allocator)
 	if len(errs) != 0 {
 		log.errorf("expected 0 type errors, got %v:", len(errs), location = loc)
 		for error in errs {
