@@ -20,6 +20,12 @@ Variable_Write_Node :: struct {
 	value: Node,
 }
 
+Mutating_Write_Node :: struct {
+	name:  string,
+	op: Binary_Operation,
+	value: Node,
+}
+
 Variable_Declaration_Node :: struct {
 	name:  string,
 	type:  Maybe(Node),
@@ -395,41 +401,6 @@ parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 			node := make_node(p, Index_Write_Node)
 			node.target = type
 			node.value = value
-			expr = node
-		case:
-			return {}, Parser_Error{type = .Bad_Assignment_Target, message = fmt.tprintf("Cannot assign to '%s' expressions", reflect.union_variant_typeid(expr))}
-		}
-	} else if op, ok := parser_match_any(
-		p,
-		.Plus_Equals,
-		.Minus_Equals,
-		.Slash_Equals,
-		.Star_Equals,
-	); ok {
-		rhs := parse_expression(p, .None) or_return
-
-		mutating_node := make_node(p, Binary_Op_Node)
-		mutating_node.left = expr
-		mutating_node.right = rhs
-
-		#partial switch op {
-		case .Plus_Equals:
-			mutating_node.op = .Addition
-		case .Minus_Equals:
-			mutating_node.op = .Subtraction
-		case .Star_Equals:
-			mutating_node.op = .Multiplication
-		case .Slash_Equals:
-			mutating_node.op = .Division
-		case:
-			fmt.panicf("Unhandled mutating assignment operator '%s'", op)
-		}
-
-		#partial switch type in expr {
-		case ^Variable_Read_Node:
-			node := make_node(p, Variable_Write_Node)
-			node.name = type.name
-			node.value = mutating_node
 			expr = node
 		case:
 			return {}, Parser_Error{type = .Bad_Assignment_Target, message = fmt.tprintf("Cannot assign to '%s' expressions", reflect.union_variant_typeid(expr))}

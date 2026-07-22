@@ -8,10 +8,18 @@ import "core:log"
 import "core:reflect"
 import "core:strings"
 
+Size :: distinct u64
+Offset :: distinct u64
+
 Builtin_Type :: enum {
 	Integer_Literal,
 	String_Literal,
 	Bool_Literal,
+}
+
+Checked_String :: struct {
+	data: [^]byte,
+	len:  int,
 }
 
 Type :: union {
@@ -60,11 +68,16 @@ Scope :: struct {
 }
 
 Checker :: struct {
-	errors:         [dynamic]Type_Error,
-	scopes:         [dynamic]Scope,
-	function_depth: int,
-	loop_depth:     int,
-	allocator:      runtime.Allocator,
+	errors:                   [dynamic]Type_Error,
+	scopes:                   [dynamic]Scope,
+	function_depth:           int,
+	current_function:         ^Function,
+	current_stack_frame_size: Size,
+	loop_stack:               [dynamic]^Checked_Loop,
+	allocator:                runtime.Allocator,
+	// CONSIDER: this thing's lifetime is weird
+	//           it can just leak for now
+	string_interner:          strings.Intern,
 }
 
 Checked_Program :: struct {
@@ -80,16 +93,24 @@ Checked_Statement :: union {
 	^Checked_Declaration,
 	^Checked_Break,
 	^Checked_Continue,
-	^Checked_Return
+	^Checked_Return,
 }
-Checked_Return :: struct {val: Maybe(Checked_Expression)}
-Checked_Break :: struct {}
-Checked_Continue :: struct {}
+Checked_Return :: struct {
+	val: Maybe(Checked_Expression),
+}
+Checked_Break :: struct {
+	target: Checked_Statement,
+}
+
+Checked_Continue :: struct {
+	target: Checked_Statement,
+}
 
 Checked_Declaration :: struct {
-	name: string,
-	type: ^Type,
-	value: Maybe(Checked_Expression)
+	name:   string,
+	offset: Offset,
+	type:   ^Type,
+	value:  Maybe(Checked_Expression),
 }
 
 Checked_Block :: struct {
@@ -121,7 +142,10 @@ Checked_Index_Write :: struct {
 	new_value: Checked_Expression,
 }
 
-invalid_expression := Checked_Expression{type = &invalid_type, variant = nil}
+invalid_expression := Checked_Expression {
+	type    = &invalid_type,
+	variant = nil,
+}
 
 Checked_Expression :: struct {
 	type:    ^Type,
@@ -131,7 +155,7 @@ Checked_Expression :: struct {
 		// FUTURE: other bool/int/string types
 		^Boolean_Node,
 		^Integer_Node,
-		^String_Node,
+		^Checked_String,
 		Function,
 		^Checked_Variable_Read,
 		^Checked_Call,
@@ -140,23 +164,18 @@ Checked_Expression :: struct {
 }
 
 Array_Literal :: struct {
-	elem_type: ^Type, 
-	body: xar.Array(Checked_Expression, 3)
+	elem_type: ^Type,
+	body:      xar.Array(Checked_Expression, 3),
 }
 
 Checked_Call :: struct {
-	callee: Checked_Expression,
-	arguments: xar.Array(Checked_Expression, 3)
+	callee:    Checked_Expression,
+	arguments: xar.Array(Checked_Expression, 3),
 }
 
 Checked_Variable_Read :: struct {
-    decl: ^Checked_Declaration
+	decl: ^Checked_Declaration,
 }
-
-// for transforming function foo() {} into foo = function(){}
-// the latter isn't actually valid syntax currently,
-// so there's no unchecked equivalent to this node
-Checked_Functions :: struct {}
 
 Checked_Array_Index :: struct {
 	array: Checked_Expression,
@@ -166,7 +185,23 @@ Checked_Array_Index :: struct {
 Checked_Binary_Op :: struct {
 	left:  Checked_Expression,
 	right: Checked_Expression,
-	op:    Binary_Operation,
+	op:    Checked_Binary_Operation,
+}
+
+Checked_Binary_Operation :: enum {
+	Invalid = 0,
+	Add_I64,
+	Sub_I64,
+	Mul_I64,
+	Div_I64,
+	Byte_Compare,
+	Negate_Byte_Compare,
+	Less_Than_I64,
+	Greater_Than_I64,
+	Less_Than_Or_Equal_To_I64,
+	Greater_Than_Or_Equal_To_I64,
+	Boolean_Or,
+	Boolean_And,
 }
 
 make_checker :: proc(allocator: runtime.Allocator) -> Checker {
@@ -174,8 +209,8 @@ make_checker :: proc(allocator: runtime.Allocator) -> Checker {
 	checker.allocator = allocator
 	checker.errors = make([dynamic]Type_Error, allocator)
 	checker.scopes.allocator = allocator
-
-	return checker 
+	checker.loop_stack.allocator = context.temp_allocator
+	return checker
 }
 
 check_program :: proc(
@@ -239,6 +274,11 @@ declare_variable_type :: proc(checker: ^Checker, decl: ^Checked_Declaration) {
 			},
 		)
 	} else {
+		current_offset := Offset(checker.current_stack_frame_size)
+		alignment := Offset(type_align_of(decl.type))
+		size := Offset(type_size_of(decl.type))
+		decl.offset = ((current_offset + (alignment - 1)) & ~(alignment - 1))
+		checker.current_stack_frame_size = Size(decl.offset + size)
 		scope.variables[decl.name] = decl
 	}
 }
@@ -326,9 +366,9 @@ check_while :: proc(checker: ^Checker, node: ^While_Node) -> Checked_Statement {
 		)
 	}
 
-	checker.loop_depth += 1
+	append(&checker.loop_stack, stmt)
 	stmt.body = check_statement(checker, node.body)
-	checker.loop_depth -= 1
+	pop(&checker.loop_stack)
 	return stmt
 }
 
@@ -377,56 +417,69 @@ check_statement :: proc(checker: ^Checker, stmt: Node) -> Checked_Statement {
 		return check_function_declaration(checker, type)
 	case ^Break_Node:
 		return check_break(checker, type)
-		case ^Continue_Node:
-			return check_continue(checker, type)
-			case ^Return_Node:
-				return check_return(checker, type)
+	case ^Continue_Node:
+		return check_continue(checker, type)
+	case ^Return_Node:
+		return check_return(checker, type)
 	case:
 		return check_expression_statement(checker, stmt)
 	}
 }
 
-check_return :: proc(checker: ^Checker, node: ^Return_Node) -> Checked_Statement{
+check_return :: proc(checker: ^Checker, node: ^Return_Node) -> Checked_Statement {
 	stmt := checker_new(Checked_Return, checker)
-	
+
 	if node.value != nil {
 		// FUTURE: track curent function for return based hints?
 		stmt.val = check_expression(checker, node.value.?, nil)
 	}
 
 	if checker.function_depth <= 0 {
-		append(&checker.errors, Type_Error {
-			type = .Bad_Control_Flow,
-			message = "`return` can only be used inside functions!"
-		})
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Control_Flow,
+				message = "`return` can only be used inside functions!",
+			},
+		)
 	}
-	
+
 	return stmt
 }
 
-check_break :: proc(checker: ^Checker, node: ^Break_Node) -> Checked_Statement{
+check_break :: proc(checker: ^Checker, node: ^Break_Node) -> Checked_Statement {
 	stmt := checker_new(Checked_Break, checker)
 
-	if checker.loop_depth <= 0 {
-		append(&checker.errors, Type_Error {
-			type = .Bad_Control_Flow,
-			message = "`break` can only be used inside loops!"
-		})
+	if len(checker.loop_stack) <= 0 {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Control_Flow,
+				message = "`break` can only be used inside loops!",
+			},
+		)
+	} else {
+		stmt.target = checker.loop_stack[len(checker.loop_stack) - 1]
 	}
-	
+
 	return stmt
 }
 
-check_continue :: proc(checker: ^Checker, node: ^Continue_Node) -> Checked_Statement{
+check_continue :: proc(checker: ^Checker, node: ^Continue_Node) -> Checked_Statement {
 	stmt := checker_new(Checked_Continue, checker)
 
-	if checker.loop_depth <= 0 {
-		append(&checker.errors, Type_Error {
-			type = .Bad_Control_Flow,
-			message = "`continue` can only be used inside loops!"
-		})
+	if len(checker.loop_stack) <= 0 {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Control_Flow,
+				message = "`continue` can only be used inside loops!",
+			},
+		)
+	} else {
+		stmt.target = checker.loop_stack[len(checker.loop_stack) - 1]
 	}
-	
+
 	return stmt
 }
 
@@ -455,28 +508,35 @@ check_function_declaration :: proc(
 	push_checker_scope(checker)
 	checker.function_depth += 1
 
+
 	params: xar.Array(^Checked_Declaration, 2)
 	xar.init(&params, checker.allocator)
+	func := Function {
+		parameters = params,
+	}
+	// CONSIDER: disallow nested functions?
+	last_func := checker.current_function
+	last_sfs := checker.current_stack_frame_size
+	checker.current_function = &func
+	checker.current_stack_frame_size = 0
 	for param in decl.type.(Function_Type).parameters {
 		param_decl := checker_new(Checked_Declaration, checker)
 		param_decl.name = param.name
 		param_decl.type = param.type
 		declare_variable_type(checker, param_decl)
-		xar.append(&params, param_decl)
+		xar.append(&func.parameters, param_decl)
 	}
-	
+
 	body := check_block(checker, node.body.(^Block_Node))
 
 	checker.function_depth -= 1
 	pop_checker_scope(checker)
-	func := Function {
-		body = body, 
-		parameters = params,
-	}
-	
+	checker.current_function = last_func
+	checker.current_stack_frame_size = last_sfs
+
 	decl.value = Checked_Expression {
 		variant = func,
-		type = decl.type
+		type    = decl.type,
 	}
 	return decl
 }
@@ -492,24 +552,24 @@ check_variable_declaration :: proc(
 	decl.name = node.name
 	expr := check_expression(checker, node.value, decl.type)
 	decl.value = expr
-	
+
 	if decl.type == nil {
 		decl.type = expr.type
-	} 
-		if !is_convertible_from_to(expr.type, decl.type) {
-			append(
-				&checker.errors,
-				Type_Error {
-					type = .Bad_Conversion,
-					message = fmt.tprintf(
-						"Unable to assign type %s to variable %s with type %s",
-						type_to_string(expr.type, context.temp_allocator),
-						node.name,
-						type_to_string(decl.type, context.temp_allocator),
-					),
-				},
-			)
-		
+	}
+	if !is_convertible_from_to(expr.type, decl.type) {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Conversion,
+				message = fmt.tprintf(
+					"Unable to assign type %s to variable %s with type %s",
+					type_to_string(expr.type, context.temp_allocator),
+					node.name,
+					type_to_string(decl.type, context.temp_allocator),
+				),
+			},
+		)
+
 	}
 
 	declare_variable_type(checker, decl)
@@ -687,7 +747,7 @@ check_expression :: proc(
 	case ^Index_Node:
 		return check_index(checker, type)
 	case ^String_Node:
-		return {type = get_type(checker, Builtin_Type.String_Literal), variant = type}
+		return check_string_literal(checker, type)
 	case ^Integer_Node:
 		return {type = get_type(checker, Builtin_Type.Integer_Literal), variant = type}
 	case ^Boolean_Node:
@@ -698,11 +758,25 @@ check_expression :: proc(
 	}
 }
 
+check_string_literal :: proc(checker: ^Checker, node: ^String_Node) -> Checked_Expression {
+	interned, _ := strings.intern_get(&checker.string_interner, node.value)
+	expr := checker_new(Checked_String, checker)
+	expr.data = raw_data(interned)
+	expr.len = len(interned)
+	return Checked_Expression{
+		variant = expr,
+		type = get_type(checker, Builtin_Type.String_Literal)
+	}
+}
+
 check_variable_read :: proc(checker: ^Checker, node: ^Variable_Read_Node) -> Checked_Expression {
 	var, found := checker_resolve_variable(checker, node.name)
 	read := checker_new(Checked_Variable_Read, checker)
 	read.decl = var
-	expr := Checked_Expression{variant = read, type = &invalid_type}
+	expr := Checked_Expression {
+		variant = read,
+		type    = &invalid_type,
+	}
 	if !found {
 		append(
 			&checker.errors,
@@ -743,7 +817,10 @@ check_compound :: proc(
 
 	if type_is_array(target_type) {
 		array := checker_new(Array_Literal, checker)
-		expr := Checked_Expression{type = target_type, variant = array}
+		expr := Checked_Expression {
+			type    = target_type,
+			variant = array,
+		}
 		arr_type := target_type.(Array_Type)
 		array.elem_type = arr_type.elem_type
 		xar.init(&array.body, checker.allocator)
@@ -872,7 +949,10 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> Checked_Expression {
 	callee := check_expression(checker, node.callee, nil)
 	call.callee = callee
 	xar.init(&call.arguments, checker.allocator)
-	expr := Checked_Expression{variant = call, type = &invalid_type}
+	expr := Checked_Expression {
+		variant = call,
+		type    = &invalid_type,
+	}
 
 	if !type_is_function(callee.type) {
 		append(
@@ -928,7 +1008,7 @@ check_call :: proc(checker: ^Checker, node: ^Call_Node) -> Checked_Expression {
 	}
 
 	expr.type = func_type.ret
-	
+
 	return expr
 }
 
@@ -1011,59 +1091,185 @@ check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Che
 
 	left := check_expression(checker, node.left, nil)
 	right := check_expression(checker, node.right, left.type)
-	op := node.op
 
 	checked_node.left = left
 	checked_node.right = right
-	checked_node.op = op
 	expr := Checked_Expression {
 		variant = checked_node,
+		type    = &invalid_type,
 	}
 
-	if type_is_integer(left.type) && type_is_integer(right.type) {
-		#partial switch node.op {
-		case .Addition, .Subtraction, .Multiplication, .Division:
-			expr.type = left.type
-			return expr
+	switch node.op {
+	case .Invalid:
+		panic("Invalid operation")
+	case .Addition:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Add_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error{type = .Bad_Operator, message = "Expected integer types for addition"},
+			)
+		}
+	case .Subtraction:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Sub_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected integer types for subtraction",
+				},
+			)
+		}
+	case .Multiplication:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Mul_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected integer types for multiplication",
+				},
+			)
+		}
+	case .Division:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Div_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error{type = .Bad_Operator, message = "Expected integer types for division"},
+			)
+		}
+	case .Less_Than:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Less_Than_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected integer types for comparison",
+				},
+			)
+		}
+	case .Less_Than_Or_Equal_To:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Less_Than_Or_Equal_To_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected integer types for comparison",
+				},
+			)
+		}
+	case .Greater_Than:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Greater_Than_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected integer types for comparison",
+				},
+			)
+		}
+	case .Greater_Than_Or_Equal_To:
+		if type_is_integer(left.type) && type_is_integer(right.type) {
+			checked_node.op = .Greater_Than_Or_Equal_To_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected integer types for comparison",
+				},
+			)
+		}
+	case .Equal_To:
+		if !types_are_equivalent(left.type, right.type) {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected equivalent types for comparison",
+				},
+			)
+		} else {
+			checked_node.op = .Byte_Compare
+		}
+	case .Not_Equal_To:
+		if !types_are_equivalent(left.type, right.type) {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected equivalent types for comparison",
+				},
+			)
+		} else {
+			checked_node.op = .Negate_Byte_Compare
+		}
+	case .Logical_And:
+		if type_is_boolean(left.type) && type_is_boolean(right.type) {
+			checked_node.op = .Boolean_And
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected boolean types for logical and",
+				},
+			)
+		}
+	case .Logical_Or:
+		if type_is_boolean(left.type) && type_is_boolean(right.type) {
+			checked_node.op = .Boolean_Or
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected boolean types for logical or",
+				},
+			)
 		}
 	}
 
-	if type_is_boolean(left.type) && type_is_boolean(right.type) {
+	switch checked_node.op {
+	case .Invalid:
+		expr.type = &invalid_type
+	case .Add_I64, .Sub_I64, .Div_I64, .Mul_I64:
+		expr.type = checked_node.left.type
+	case .Byte_Compare,
+	     .Negate_Byte_Compare,
+	     .Less_Than_I64,
+	     .Greater_Than_I64,
+	     .Less_Than_Or_Equal_To_I64,
+	     .Greater_Than_Or_Equal_To_I64,
+	     .Boolean_Or,
+	     .Boolean_And:
 		expr.type = get_type(checker, Builtin_Type.Bool_Literal)
-		return expr
 	}
 
-	if types_are_equivalent(left.type, right.type) {
-		if op == .Equal_To || op == .Not_Equal_To {
-			expr.type = get_type(checker, Builtin_Type.Bool_Literal)
-			return expr
-		}
-
-		if type_is_integer(left.type) {
-			if op == .Less_Than ||
-			   op == .Greater_Than ||
-			   op == .Less_Than_Or_Equal_To ||
-			   op == .Greater_Than_Or_Equal_To {
-				expr.type = get_type(checker, Builtin_Type.Bool_Literal)
-				return expr
-			}
-		}
-	}
-
-
-	append(
-		&checker.errors,
-		Type_Error {
-			type = .Bad_Operator,
-			message = fmt.tprintf(
-				"Unable to use operator %s on types %s and %s",
-				op,
-				type_to_string(left.type, context.temp_allocator),
-				type_to_string(right.type, context.temp_allocator),
-			),
-		},
-	)
-	expr.type = &invalid_type
+	// append(
+	// 	&checker.errors,
+	// 	Type_Error {
+	// 		type = .Bad_Operator,
+	// 		message = fmt.tprintf(
+	// 			"Unable to use operator %s on types %s and %s",
+	// 			op,
+	// 			type_to_string(left.type, context.temp_allocator),
+	// 			type_to_string(right.type, context.temp_allocator),
+	// 		),
+	// 	},
+	// )
 	return expr
 }
 
@@ -1077,5 +1283,47 @@ make_type :: proc(
 
 checker_new :: proc($T: typeid, checker: ^Checker) -> ^T {
 	return new(T, checker.allocator)
+}
+
+type_size_of :: proc(t: ^Type) -> Size {
+	switch variant in t {
+	case Builtin_Type:
+		switch variant {
+		case .Integer_Literal:
+			return size_of(i64)
+		case .String_Literal:
+			return size_of(string)
+		case .Bool_Literal:
+			return size_of(bool)
+		}
+	case Function_Type:
+		return size_of(rawptr)
+	case Array_Type:
+		return Size(variant.length) * type_size_of(variant.elem_type)
+	case nil:
+		return 0
+	}
+	panic("Impossible type")
+}
+
+type_align_of :: proc(t: ^Type) -> Size {
+	switch variant in t {
+	case Builtin_Type:
+		switch variant {
+		case .Integer_Literal:
+			return align_of(i64)
+		case .String_Literal:
+			return align_of(string)
+		case .Bool_Literal:
+			return align_of(bool)
+		}
+	case Function_Type:
+		return align_of(rawptr)
+	case Array_Type:
+		return type_align_of(variant.elem_type)
+	case nil:
+		return 1
+	}
+	panic("Impossible type")
 }
 

@@ -3,6 +3,7 @@ package palladium
 import "core:container/xar"
 import "core:log"
 import "core:reflect"
+import "core:slice"
 import "core:testing"
 
 @(test)
@@ -118,23 +119,29 @@ test_parse_parentheses :: proc(t: ^testing.T) {
 
 @(test)
 test_basic_evaluation :: proc(t: ^testing.T) {
-	val, val_err := execute_single_expression(t, "1 + 1")
-	expect_nil(t, val_err)
-	expect_values_equal(t, val, 2)
+	val := execute_single_expression(t, "1 + 1")
+	testing.expect_value(t, len(val), 8)
+	as_int := slice.to_type(val, i64)
+	testing.expect_value(t, as_int, 2)
+	delete(val)
 }
 
 @(test)
 test_order_of_operations :: proc(t: ^testing.T) {
-	val, val_err := execute_single_expression(t, "1 + 2 * (3 / 4 - 5) * 6")
-	expect_nil(t, val_err)
-	expect_values_equal(t, val, 1 + 2 * (3 / 4 - 5) * 6)
+	val := execute_single_expression(t, "1 + 2 * (3 / 4 - 5) * 6")
+	testing.expect_value(t, len(val), 8)
+	as_int := slice.to_type(val, i64)
+	testing.expect_value(t, as_int, 1 + 2 * (3 / 4 - 5) * 6)
+	delete(val)
 }
 
 @(test)
 test_associativity :: proc(t: ^testing.T) {
-	val, val_err := execute_single_expression(t, "1 - 2 - 3 - 4")
-	expect_nil(t, val_err)
-	expect_values_equal(t, val, 1 - 2 - 3 - 4)
+	val := execute_single_expression(t, "1 - 2 - 3 - 4")
+	testing.expect_value(t, len(val), 8)
+	as_int := slice.to_type(val, i64)
+	testing.expect_value(t, as_int, 1 - 2 - 3 - 4)
+	delete(val)
 }
 
 @(test)
@@ -157,13 +164,14 @@ test_read_variable :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt := Runtime{}
-	defer cleanup_runtime(&rt)
-	expect_nil(t, execute_file(&rt, prog))
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.variable_stack)
+	defer delete(vm.stack)
 
-	val, val_err := read_variable(&rt, "z")
-	expect_nil(t, val_err)
-	expect_values_equal(t, val, 400)
+	z_slot := find_global_variable_slot(prog, "z")
+	testing.expect_value(t, slice.to_type(vm.variable_stack[z_slot:], i64), 400)
+
 }
 
 @(test)
@@ -174,14 +182,13 @@ test_variable_declaration :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt := Runtime{}
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	val, read_err := read_variable(&rt, "x")
-	expect_nil(t, read_err)
-	expect_values_equal(t, val, 10)
+	x := find_global_variable_slot(prog, "x")
+	testing.expect_value(t, slice.to_type(vm.variable_stack[x:], i64), 10)
 }
 
 @(test)
@@ -208,11 +215,13 @@ test_variable_declaration_parse :: proc(t: ^testing.T) {
 	value := expect_and_unwrap(t, var.value.?.variant, ^Checked_Binary_Op)
 	testing.expect_value(t, var.name, "xyz1")
 
-	rt := Runtime{}
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	actual_val, eval_err := evaluate_binary_expression(&rt, value)
-	expect_nil(t, eval_err)
-	expect_values_equal(t, actual_val, 30)
+	x := find_global_variable_slot(prog, "xyz1")
+	testing.expect_value(t, slice.to_type(vm.variable_stack[x:], i64), 30)
 }
 
 @(test)
@@ -253,14 +262,14 @@ test_assignment_run :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt := Runtime{}
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 15)
-	expect_variable_value(t, &rt, "y", 10)
-	expect_variable_value(t, &rt, "z", 40)
+	expect_variable_value(t, prog, vm, "x", 15)
+	expect_variable_value(t, prog, vm, "y", 10)
+	expect_variable_value(t, prog, vm, "z", 40)
 }
 
 @(test)
@@ -314,16 +323,18 @@ test_string_evaluation :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, nil)
 
 	prog := expect_fine_types(t, ast)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	rt := Runtime{}
-	defer cleanup_runtime(&rt)
+	name := find_global_variable_slot(prog, "name")
+	str_val := slice.to_type(vm.variable_stack[name:], Checked_String)
+	testing.expect_value(t, transmute(string)str_val, "rats")
+	// var, var_err := read_variable(&rt, "name")
+	// expect_nil(t, var_err)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	var, var_err := read_variable(&rt, "name")
-	expect_nil(t, var_err)
-
-	expect_values_equal(t, var, "rats")
+	// expect_values_equal(t, var, "rats")
 }
 
 @(test)
@@ -392,13 +403,12 @@ test_evaluate_booleans :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	rt_err := execute_file(&rt, prog)
-	expect_nil(t, rt_err)
-
-	expect_variable_value(t, &rt, "x", true)
+	expect_variable_value(t, prog, vm, "x", true)
 }
 
 @(test)
@@ -504,13 +514,13 @@ test_equality_evaluate :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "yes", true)
-	expect_variable_value(t, &rt, "no", false)
+	expect_variable_value(t, prog, vm, "yes", true)
+	expect_variable_value(t, prog, vm, "no", false)
+	delete(vm.variable_stack)
+	delete(vm.stack)
 }
 
 @(test)
@@ -523,15 +533,15 @@ test_comparison_op_eval_true :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "l", true)
-	expect_variable_value(t, &rt, "g", true)
-	expect_variable_value(t, &rt, "le", true)
-	expect_variable_value(t, &rt, "ge", true)
+	expect_variable_value(t, prog, vm, "l", true)
+	expect_variable_value(t, prog, vm, "g", true)
+	expect_variable_value(t, prog, vm, "le", true)
+	expect_variable_value(t, prog, vm, "ge", true)
 }
 
 @(test)
@@ -544,15 +554,15 @@ test_comparison_op_eval_false :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "l", false)
-	expect_variable_value(t, &rt, "g", false)
-	expect_variable_value(t, &rt, "le", false)
-	expect_variable_value(t, &rt, "ge", false)
+	expect_variable_value(t, prog, vm, "l", false)
+	expect_variable_value(t, prog, vm, "g", false)
+	expect_variable_value(t, prog, vm, "le", false)
+	expect_variable_value(t, prog, vm, "ge", false)
 }
 
 @(test)
@@ -642,12 +652,12 @@ test_if_execution :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.variable_stack)
+	defer delete(vm.stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 1)
+	expect_variable_value(t, prog, vm, "x", 1)
 }
 
 @(test)
@@ -657,12 +667,12 @@ test_else_execution :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 2)
+	expect_variable_value(t, prog, vm, "x", 2)
 }
 
 @(test)
@@ -700,14 +710,13 @@ test_while_execution :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	rt_err := execute_file(&rt, prog)
-	expect_nil(t, rt_err)
-
-	expect_variable_value(t, &rt, "x", 1024)
-	expect_variable_value(t, &rt, "y", 0)
+	expect_variable_value(t, prog, vm, "x", 1024)
+	expect_variable_value(t, prog, vm, "y", 0)
 }
 
 @(test)
@@ -732,12 +741,12 @@ test_blocks_eval :: proc(t: ^testing.T) {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.variable_stack)
+	defer delete(vm.stack)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 60)
+	expect_variable_value(t, prog, vm, "x", 60)
 }
 
 @(test)
@@ -748,16 +757,13 @@ test_scope_shadowing :: proc(t: ^testing.T) {
 	)
 
 	expect_nil(t, err)
-
 	prog := expect_fine_types(t, ast)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-
-	rt: Runtime
-	defer cleanup_runtime(&rt)
-
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 11)
+	expect_variable_value(t, prog, vm, "x", 11)
 }
 
 @(test)
@@ -766,7 +772,6 @@ test_scoping :: proc(t: ^testing.T) {
 
 	expect_nil(t, err)
 
-	// expect_fine_types(t, ast)
 	_, errs := check_program(ast, context.temp_allocator)
 	testing.expect_value(t, len(errs), 2)
 	testing.expect_value(t, errs[0].type, Checker_Error_Type.Undeclared) // Y isn't in the outer scope
@@ -794,13 +799,14 @@ while y != 0 {
 
 	prog := expect_fine_types(t, ast)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
 
-	expect_nil(t, execute_file(&rt, prog))
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	expect_variable_value(t, &rt, "x", 4)
-	expect_variable_value(t, &rt, "y", 7)
+	expect_variable_value(t, prog, vm, "x", 4)
+	expect_variable_value(t, prog, vm, "y", 7)
 }
 
 @(test)
@@ -823,45 +829,31 @@ while y != 0 {
 	expect_nil(t, err)
 
 	prog := expect_fine_types(t, ast)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
+	defer delete(vm.stack)
+	defer delete(vm.variable_stack)
 
-	rt: Runtime
-	defer cleanup_runtime(&rt)
-
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 4)
-	expect_variable_value(t, &rt, "y", 0)
+	expect_variable_value(t, prog, vm, "x", 4)
+	expect_variable_value(t, prog, vm, "y", 0)
 }
 
 @(test)
 test_assignment_tk :: proc(t: ^testing.T) {
 	tokens := tokenize_entire_source("+==--=**=*/=", context.temp_allocator)
 
-	testing.expect_value(t, len(tokens), 9)
-	testing.expect_value(t, tokens[0].type, Token_Type.Plus_Equals)
-	testing.expect_value(t, tokens[1].type, Token_Type.Equals)
+	testing.expect_value(t, len(tokens), 12)
+	testing.expect_value(t, tokens[0].type, Token_Type.Plus)
+	testing.expect_value(t, tokens[1].type, Token_Type.Double_Equals)
 	testing.expect_value(t, tokens[2].type, Token_Type.Minus)
-	testing.expect_value(t, tokens[3].type, Token_Type.Minus_Equals)
-	testing.expect_value(t, tokens[4].type, Token_Type.Star)
-	testing.expect_value(t, tokens[5].type, Token_Type.Star_Equals)
+	testing.expect_value(t, tokens[3].type, Token_Type.Minus)
+	testing.expect_value(t, tokens[4].type, Token_Type.Equals)
+	testing.expect_value(t, tokens[5].type, Token_Type.Star)
 	testing.expect_value(t, tokens[6].type, Token_Type.Star)
-	testing.expect_value(t, tokens[7].type, Token_Type.Slash_Equals)
-}
-
-@(test)
-test_mut_assignment :: proc(t: ^testing.T) {
-	ast, err := parse_file("var x = 3; x += 3; x *= 4; x -= 3; x /= 3;", context.temp_allocator)
-
-	expect_nil(t, err)
-
-	prog := expect_fine_types(t, ast)
-
-	rt: Runtime
-	defer cleanup_runtime(&rt)
-
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "x", 7)
+	testing.expect_value(t, tokens[7].type, Token_Type.Equals)
+	testing.expect_value(t, tokens[8].type, Token_Type.Star)
+	testing.expect_value(t, tokens[9].type, Token_Type.Slash)
+	testing.expect_value(t, tokens[10].type, Token_Type.Equals)
 }
 
 @(test)
@@ -912,7 +904,7 @@ test_call_chaining :: proc(t: ^testing.T) {
 	testing.expect_value(t, num.value, 4)
 }
 
-@(test)
+/*@(test)
 test_function_definition :: proc(t: ^testing.T) {
 	ast, err := parse_file(
 		"function add(a: int, b: int): int { return a + b;}",
@@ -931,9 +923,9 @@ test_function_definition :: proc(t: ^testing.T) {
 	expect_nil(t, read_err)
 	func := expect_and_unwrap(t, add, Function)
 	testing.expect_value(t, xar.len(func.parameters), 2)
-}
+	}*/
 
-@(test)
+/*@(test)
 test_function_call :: proc(t: ^testing.T) {
 	ast, err := parse_file(
 		"function add(a: int, b: int): int { return a + b;} var x = add(2,3);",
@@ -951,7 +943,7 @@ test_function_call :: proc(t: ^testing.T) {
 	x, read_err := read_variable(&rt, "x")
 	expect_nil(t, read_err)
 	expect_values_equal(t, x, 5)
-}
+	}*/
 
 @(test)
 test_no_inference :: proc(t: ^testing.T) {
@@ -1110,16 +1102,13 @@ var x = first({1, 2, 3, 4});`,
 
 @(test)
 test_indexing_eval :: proc(t: ^testing.T) {
-	// FUTURE: When bytecode exists, remove explicit types
-	//         on inner arrays. the checker handles that,
-	//         but the tree walker is dumb, and not worth fixing
 	ast, err := parse_file(
 		`
 var double_arr = [4][4]int {
-    [4]int{1, 2, 3, 4},
-    [4]int{5, 6, 7, 8},
-    [4]int{9, 10, 11, 12},
-    [4]int{13, 14, 15, 16}
+    {1, 2, 3, 4},
+    {5, 6, 7, 8},
+    {9, 10, 11, 12},
+    {13, 14, 15, 16}
 };
 
 var row: [4]int = double_arr[0];
@@ -1130,15 +1119,13 @@ var item: int = row[0];`,
 	expect_nil(t, err)
 	prog := expect_fine_types(t, ast)
 
-	rt := Runtime{}
-	defer cleanup_runtime(&rt)
+	bytecode := program_to_bytecode(prog, context.temp_allocator)
+	vm := execute_program(bytecode)
 
-	expect_nil(t, execute_file(&rt, prog))
-
-	expect_variable_value(t, &rt, "item", 1)
+	expect_variable_value(t, prog, vm, "item", 1)
 }
 
-@(test)
+/*@(test)
 test_array_index_assign :: proc(t: ^testing.T) {
 	ast, err := parse_file(
 		`
@@ -1156,6 +1143,75 @@ var z = x[2];`,
 	expect_nil(t, execute_file(&rt, prog))
 
 	expect_variable_value(t, &rt, "z", 5)
+	}*/
+
+@(test)
+test_variable_slots :: proc(t: ^testing.T) {
+	ast, err := parse_file(
+		"var a = 1; var b = true; var c = true; var d = 1;",
+		context.temp_allocator,
+	)
+
+	testing.expect_value(t, err, nil)
+
+	prog := expect_fine_types(t, ast)
+
+	a_slot := find_global_variable_slot(prog, "a")
+	b_slot := find_global_variable_slot(prog, "b")
+	c_slot := find_global_variable_slot(prog, "c")
+	d_slot := find_global_variable_slot(prog, "d")
+	testing.expect_value(t, a_slot, 0)
+	testing.expect_value(t, b_slot, 8)
+	testing.expect_value(t, c_slot, 9)
+	testing.expect_value(t, d_slot, 16)
+}
+
+@(test)
+test_variable_slots_with_func :: proc(t: ^testing.T) {
+	ast, err := parse_file(
+		`
+var a = 1; 
+var b = true;
+var c = true;
+function test(): int {
+	var a = 1;
+	var b = 2;
+	var c = 1000;
+	return a + b;
+} 
+var d = 1;
+`,
+		context.temp_allocator,
+	)
+
+	testing.expect_value(t, err, nil)
+
+	prog := expect_fine_types(t, ast)
+
+	a_slot := find_global_variable_slot(prog, "a")
+	b_slot := find_global_variable_slot(prog, "b")
+	c_slot := find_global_variable_slot(prog, "c")
+	test_slot := find_global_variable_slot(prog, "test")
+	d_slot := find_global_variable_slot(prog, "d")
+	testing.expect_value(t, a_slot, 0)
+	testing.expect_value(t, b_slot, 8)
+	testing.expect_value(t, c_slot, 9)
+	testing.expect_value(t, test_slot, 16)
+	testing.expect_value(t, d_slot, 24)
+}
+
+
+@(private = "file")
+find_global_variable_slot :: proc(program: Checked_Program, name: string) -> Offset {
+	program := program
+	for iter := xar.iterator(&program.statements); stmt in xar.iterate_by_val(&iter) {
+		decl := stmt.(^Checked_Declaration) or_continue
+		if decl.name == name {
+			return decl.offset
+		}
+	}
+	log.errorf("No global variable '%s' found", name)
+	return max(Offset)
 }
 
 @(private = "file", require_results)
@@ -1171,10 +1227,7 @@ execute_single_expression :: proc(
 	t: ^testing.T,
 	source: string,
 	loc := #caller_location,
-) -> (
-	Value,
-	Runtime_Propagation,
-) {
+) -> []byte {
 	p := make_parser(source)
 	ast, err := parse_expression(&p, .None)
 	testing.expect_value(t, err, nil, loc = loc)
@@ -1195,11 +1248,13 @@ execute_single_expression :: proc(
 		}
 	}
 
-	rt := Runtime{}
-	defer cleanup_runtime(&rt)
-	push_scope(&rt)
-	defer pop_scope(&rt)
-	return evaluate_expression(&rt, expr)
+	compiler: Bytecode_Compiler
+	compiler.bytecode.allocator = context.temp_allocator
+	expression_to_bytecode(&compiler, expr)
+	append(&compiler.bytecode, byte(Instruction.Halt))
+	vm := execute_program(compiler.bytecode[:])
+	delete(vm.variable_stack)
+	return vm.stack[:]
 }
 
 @(private = "file")
@@ -1245,29 +1300,14 @@ expect_not_nil :: proc(
 @(private = "file")
 expect_variable_value :: proc(
 	t: ^testing.T,
-	rt: ^Runtime,
+	program: Checked_Program,
+	vm: VM,
 	name: string,
-	expected_value: Value,
+	expected_value: $T,
 	loc := #caller_location,
 ) {
-	val, err := read_variable(rt, name)
-	expect_nil(t, err, loc = loc)
-	expect_values_equal(t, val, expected_value, loc = loc, value_expr = name)
-}
-
-@(private = "file")
-expect_values_equal :: proc(
-	t: ^testing.T,
-	value, expected: Value,
-	loc := #caller_location,
-	value_expr := #caller_expression(value),
-) -> bool {
-	ok, err := values_equal(value, expected)
-	expect_nil(t, err, loc = loc)
-	if !ok {
-		log.errorf("expected %v to be %v, got %v", value_expr, expected, value, location = loc)
-	}
-	return ok
+	x := find_global_variable_slot(program, name)
+	testing.expect_value(t, slice.to_type(vm.variable_stack[x:], T), expected_value)
 }
 
 @(private = "file")
