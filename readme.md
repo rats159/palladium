@@ -21,7 +21,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Type Inference
 - [x] Arrays
 - [x] Internal improvements to support bytecode
-- [ ] Bytecode
+- [x] Bytecode
 - [ ] For loops
 - [ ] Foreign Functions
 - [ ] Imports

@@ -28,6 +28,7 @@ Token_Type :: enum {
 	Greater_Equals,
 	Exclamation_Equals,
 	Identifier,
+	Echo,
 	If,
 	Else,
 	While,
@@ -55,6 +56,7 @@ keywords := #partial [Token_Type]string {
 	.Break    = "break",
 	.Function = "function",
 	.Return   = "return",
+	.Echo     = "echo",
 }
 
 Token :: struct {
@@ -282,9 +284,23 @@ skip_whitespace :: proc(tk: ^Tokenizer) {
 		switch tk_current_rune(tk) {
 		case ' ', '\t', '\r', '\n':
 			tk_advance_rune(tk)
+		case '/':
+			if tk_next_rune(tk) == '/' {
+				skip_comment(tk)
+			}
 		case:
 			return
 		}
 	}
 }
 
+skip_comment :: proc(tk: ^Tokenizer) {
+	outer: for {
+		switch tk_current_rune(tk) {
+		case '\r', '\n', utf8.RUNE_ERROR:
+			break outer
+		case:
+			tk_advance_rune(tk)
+		}
+	}
+}

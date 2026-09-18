@@ -1,8 +1,8 @@
 #+vet explicit-allocators
 package palladium
 
-import "core:container/xar"
 import "base:runtime"
+import "core:container/xar"
 import "core:fmt"
 import "core:reflect"
 import "core:strconv"
@@ -15,15 +15,9 @@ Parser :: struct {
 	allow_compound_literal: bool,
 }
 
-Variable_Write_Node :: struct {
-	name:  string,
-	value: Node,
-}
-
-Mutating_Write_Node :: struct {
-	name:  string,
-	op: Binary_Operation,
-	value: Node,
+Write_Node :: struct {
+	left:  Node,
+	right: Node,
 }
 
 Variable_Declaration_Node :: struct {
@@ -75,11 +69,6 @@ Index_Node :: struct {
 	index: Node,
 }
 
-Index_Write_Node :: struct {
-	target: ^Index_Node,
-	value:  Node,
-}
-
 Binary_Op_Node :: struct {
 	left:  Node,
 	right: Node,
@@ -99,7 +88,6 @@ Parser_Error_Type :: enum {
 	Invalid_Value,
 	Invalid_Escape,
 	Failed_Expectation,
-	Bad_Assignment_Target,
 	Not_An_Expression,
 }
 
@@ -132,6 +120,11 @@ Call_Node :: struct {
 	arguments: xar.Array(Node, 4),
 }
 
+Echo_Node :: struct {
+	argument: Node,
+}
+
+
 Node :: union {
 	^Binary_Op_Node,
 	^Unary_Op_Node,
@@ -141,7 +134,7 @@ Node :: union {
 	^Block_Node,
 	^Variable_Declaration_Node,
 	^Variable_Read_Node,
-	^Variable_Write_Node,
+	^Write_Node,
 	^If_Node,
 	^While_Node,
 	^Continue_Node,
@@ -152,7 +145,7 @@ Node :: union {
 	^Array_Type_Node,
 	^Compound_Node,
 	^Index_Node,
-	^Index_Write_Node,
+	^Echo_Node,
 }
 
 Binding_Power :: enum {
@@ -232,6 +225,13 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 	case .Open_Curly:
 		_ = parser_expect(p, .Open_Curly) or_return
 		return parse_statement_list(p, .Close_Curly)
+	case .Echo:
+		_ = parser_expect(p, .Echo) or_return
+		val := parse_expression(p, .None) or_return
+		_ = parser_expect(p, .Semicolon) or_return
+		node := make_node(p, Echo_Node)
+		node.argument = val
+		return node, nil
 	case .Return:
 		_ = parser_expect(p, .Return) or_return
 		val: Maybe(Node)
@@ -390,21 +390,10 @@ parse_expression_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 
 	if parser_match(p, .Equals) {
 		value := parse_expression(p, .None) or_return
-
-		#partial switch type in expr {
-		case ^Variable_Read_Node:
-			node := make_node(p, Variable_Write_Node)
-			node.name = type.name
-			node.value = value
-			expr = node
-		case ^Index_Node:
-			node := make_node(p, Index_Write_Node)
-			node.target = type
-			node.value = value
-			expr = node
-		case:
-			return {}, Parser_Error{type = .Bad_Assignment_Target, message = fmt.tprintf("Cannot assign to '%s' expressions", reflect.union_variant_typeid(expr))}
-		}
+		node := make_node(p, Write_Node)
+		node.left = expr
+		node.right = value
+		expr = node
 	}
 
 	_ = parser_expect(p, .Semicolon) or_return
@@ -587,7 +576,7 @@ parse_postfix :: proc(
 		case .Open_Paren:
 			lhs = parse_call(p, lhs) or_return
 		case .Open_Bracket:
-		    lhs = parse_index(p, lhs) or_return
+			lhs = parse_index(p, lhs) or_return
 		case:
 			return lhs, nil
 		}
@@ -599,7 +588,7 @@ parse_index :: proc(p: ^Parser, base: Node) -> (_node: Node, _err: Maybe(Parser_
 	old_allow_compound := p.allow_compound_literal
 	defer p.allow_compound_literal = old_allow_compound
 	p.allow_compound_literal = true
-	
+
 	index := parse_expression(p, .None) or_return
 	_ = parser_expect(p, .Close_Bracket) or_return
 

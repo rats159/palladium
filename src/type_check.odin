@@ -53,7 +53,14 @@ Checker_Error_Type :: enum {
 	Wrong_Argument_Count,
 	Unknowable_Type,
 	Bad_Control_Flow,
+	Bad_Assignment,
+	Bad_Top_Level,
+	No_Main,
 	Internal_Error,
+}
+
+Statement_Info :: struct {
+	returns_value: bool,
 }
 
 Type_Error :: struct {
@@ -78,14 +85,17 @@ Checker :: struct {
 	// CONSIDER: this thing's lifetime is weird
 	//           it can just leak for now
 	string_interner:          strings.Intern,
+	function_index:           i64,
 }
 
 Checked_Program :: struct {
-	statements: xar.Array(Checked_Statement, 4),
+	statements:  xar.Array(^Checked_Declaration, 4),
+	globals_top: Offset,
+	main_chunk:  Maybe(int),
 }
+
 Checked_Statement :: union {
-	^Checked_Index_Write,
-	^Checked_Variable_Write,
+	^Checked_Write,
 	^Checked_Expression_Statement,
 	^Checked_Loop,
 	^Checked_If,
@@ -94,7 +104,9 @@ Checked_Statement :: union {
 	^Checked_Break,
 	^Checked_Continue,
 	^Checked_Return,
+	^Checked_Echo,
 }
+
 Checked_Return :: struct {
 	val: Maybe(Checked_Expression),
 }
@@ -106,11 +118,22 @@ Checked_Continue :: struct {
 	target: Checked_Statement,
 }
 
+Checked_Echo :: struct {
+	flavor: enum {
+		Invalid,
+		Integer,
+		String,
+		Function,
+	},
+	value:  Checked_Expression,
+}
+
 Checked_Declaration :: struct {
-	name:   string,
-	offset: Offset,
-	type:   ^Type,
-	value:  Maybe(Checked_Expression),
+	name:      string,
+	offset:    Offset,
+	type:      ^Type,
+	value:     Maybe(Checked_Expression),
+	is_global: bool,
 }
 
 Checked_Block :: struct {
@@ -132,12 +155,7 @@ Checked_Expression_Statement :: struct {
 	expr: Checked_Expression,
 }
 
-Checked_Variable_Write :: struct {
-	target:    ^Checked_Declaration,
-	new_value: Checked_Expression,
-}
-
-Checked_Index_Write :: struct {
+Checked_Write :: struct {
 	target:    Checked_Expression,
 	new_value: Checked_Expression,
 }
@@ -174,7 +192,8 @@ Checked_Call :: struct {
 }
 
 Checked_Variable_Read :: struct {
-	decl: ^Checked_Declaration,
+	decl:      ^Checked_Declaration,
+	is_global: bool,
 }
 
 Checked_Array_Index :: struct {
@@ -210,6 +229,7 @@ make_checker :: proc(allocator: runtime.Allocator) -> Checker {
 	checker.errors = make([dynamic]Type_Error, allocator)
 	checker.scopes.allocator = allocator
 	checker.loop_stack.allocator = context.temp_allocator
+	checker.function_index = 1 // 0 == global scope
 	return checker
 }
 
@@ -234,7 +254,39 @@ check_program :: proc(
 	assert(is_block, "malformed program")
 
 	for iter := xar.iterator(&body_block.statements); stmt in xar.iterate_by_val(&iter) {
-		xar.append(&program.statements, check_statement(&checker, stmt))
+		stmt := check_top_level_statement(&checker, stmt)
+		main_check: if stmt.name == "main" {
+			if stmt.value == nil {break main_check}
+			val := stmt.value.?
+			if func, is_func := val.variant.(Function); is_func {
+				program.main_chunk = int(func.index)
+			} else {
+				append(
+					&checker.errors,
+					Type_Error {
+						type = .Bad_Top_Level,
+						message = fmt.tprint(
+							"The top-level value `main` must refer to a function",
+						),
+					},
+				)
+			}
+		}
+		xar.append(&program.statements, stmt)
+	}
+
+	program.globals_top = Offset(checker.current_stack_frame_size)
+
+	if program.main_chunk == nil {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .No_Main,
+				message = fmt.tprint(
+					"This package has no top-level functions named main, so it cannot execute.",
+				),
+			},
+		)
 	}
 
 	return program, checker.errors[:]
@@ -283,12 +335,34 @@ declare_variable_type :: proc(checker: ^Checker, decl: ^Checked_Declaration) {
 	}
 }
 
-check_index_write :: proc(checker: ^Checker, node: ^Index_Write_Node) -> Checked_Statement {
-	target := check_index(checker, node.target)
+is_valid_assignment_target :: proc(expr: Checked_Expression) -> bool {
+	#partial switch t in expr.variant {
+	case ^Checked_Variable_Read:
+		return true
+	case ^Checked_Array_Index:
+		return is_valid_assignment_target(t.array)
+	case:
+		return false
+	}
+}
 
-	new_value := check_expression(checker, node.value, target.type)
+check_write :: proc(checker: ^Checker, node: ^Write_Node) -> (Checked_Statement, Statement_Info) {
+	info: Statement_Info
+	target := check_expression(checker, node.left, nil)
 
-	statement := checker_new(Checked_Index_Write, checker)
+	if !is_valid_assignment_target(target) {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Assignment,
+				message = fmt.tprint("This is not a valid assignment target"),
+			},
+		)
+	}
+
+	new_value := check_expression(checker, node.right, target.type)
+
+	statement := checker_new(Checked_Write, checker)
 	statement.new_value = new_value
 	statement.target = target
 
@@ -306,48 +380,10 @@ check_index_write :: proc(checker: ^Checker, node: ^Index_Write_Node) -> Checked
 		)
 	}
 
-	return statement
+	return statement, info
 }
 
-check_variable_write :: proc(checker: ^Checker, node: ^Variable_Write_Node) -> Checked_Statement {
-	var, found := checker_resolve_variable(checker, node.name)
-
-	stmt := checker_new(Checked_Variable_Write, checker)
-	stmt.target = var
-
-	if !found {
-		append(
-			&checker.errors,
-			Type_Error {
-				type = .Undeclared,
-				message = fmt.tprintf("Undeclared variable '%s'", node.name),
-			},
-		)
-		return stmt
-	}
-
-	expr := check_expression(checker, node.value, var.type)
-	stmt.new_value = expr
-
-	if !is_convertible_from_to(expr.type, var.type) {
-		append(
-			&checker.errors,
-			Type_Error {
-				type = .Bad_Conversion,
-				message = fmt.tprintf(
-					"Unable to assign type %s to variable %s with type %s",
-					type_to_string(expr.type, context.temp_allocator),
-					node.name,
-					type_to_string(var.type, context.temp_allocator),
-				),
-			},
-		)
-	}
-
-	return stmt
-}
-
-check_while :: proc(checker: ^Checker, node: ^While_Node) -> Checked_Statement {
+check_while :: proc(checker: ^Checker, node: ^While_Node) -> (Checked_Statement, Statement_Info) {
 	stmt := checker_new(Checked_Loop, checker)
 	cond := check_expression(checker, node.condition, get_type(checker, Builtin_Type.Bool_Literal))
 
@@ -367,12 +403,14 @@ check_while :: proc(checker: ^Checker, node: ^While_Node) -> Checked_Statement {
 	}
 
 	append(&checker.loop_stack, stmt)
-	stmt.body = check_statement(checker, node.body)
+
+	body, info := check_statement(checker, node.body)
+	stmt.body = body
 	pop(&checker.loop_stack)
-	return stmt
+	return stmt, info
 }
 
-check_if :: proc(checker: ^Checker, node: ^If_Node) -> Checked_Statement {
+check_if :: proc(checker: ^Checker, node: ^If_Node) -> (Checked_Statement, Statement_Info) {
 	stmt := checker_new(Checked_If, checker)
 	cond := check_expression(checker, node.condition, get_type(checker, Builtin_Type.Bool_Literal))
 	stmt.condition = cond
@@ -389,24 +427,53 @@ check_if :: proc(checker: ^Checker, node: ^If_Node) -> Checked_Statement {
 			},
 		)
 	}
-
-	stmt.body = check_statement(checker, node.body)
+	if_info, else_info: Statement_Info
+	stmt.body, if_info = check_statement(checker, node.body)
 
 	if node.else_body != nil {
-		stmt.else_body = check_statement(checker, node.else_body.?)
+		stmt.else_body, else_info = check_statement(checker, node.else_body.?)
 	}
 
-	return stmt
+	return stmt, {returns_value = if_info.returns_value && else_info.returns_value}
 }
 
-check_statement :: proc(checker: ^Checker, stmt: Node) -> Checked_Statement {
+check_top_level_statement :: proc(checker: ^Checker, stmt: Node) -> ^Checked_Declaration {
+	stmt, _ := check_statement(checker, stmt)
+
+	#partial switch type in stmt {
+	case ^Checked_Declaration:
+		return type
+	case:
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Top_Level,
+				message = fmt.tprintf(
+					"Only declarations are allowed at the top level, recieved a %v",
+					type_dereference(reflect.union_variant_typeid(stmt)),
+				),
+			},
+		)
+	}
+
+	return nil
+}
+
+type_dereference :: proc(t: typeid) -> typeid {
+	info := type_info_of(t)
+	#partial switch t in info.variant {
+	case runtime.Type_Info_Pointer:
+		info = t.elem
+	}
+	return info.id
+}
+
+check_statement :: proc(checker: ^Checker, stmt: Node) -> (Checked_Statement, Statement_Info) {
 	#partial switch type in stmt {
 	case ^Variable_Declaration_Node:
 		return check_variable_declaration(checker, type)
-	case ^Variable_Write_Node:
-		return check_variable_write(checker, type)
-	case ^Index_Write_Node:
-		return check_index_write(checker, type)
+	case ^Write_Node:
+		return check_write(checker, type)
 	case ^Block_Node:
 		return check_block(checker, type)
 	case ^While_Node:
@@ -421,12 +488,56 @@ check_statement :: proc(checker: ^Checker, stmt: Node) -> Checked_Statement {
 		return check_continue(checker, type)
 	case ^Return_Node:
 		return check_return(checker, type)
+	case ^Echo_Node:
+		return check_echo(checker, type)
 	case:
 		return check_expression_statement(checker, stmt)
 	}
 }
 
-check_return :: proc(checker: ^Checker, node: ^Return_Node) -> Checked_Statement {
+check_echo :: proc(checker: ^Checker, node: ^Echo_Node) -> (Checked_Statement, Statement_Info) {
+	checked_val := check_expression(checker, node.argument, nil)
+
+	node := checker_new(Checked_Echo, checker)
+
+	if type_is_integer(checked_val.type) {
+		node.flavor = .Integer
+	} else if type_is_string(checked_val.type) {
+		node.flavor = .String
+	} else if type_is_function(checked_val.type) {
+		node.flavor = .Function
+	} else {
+		node.flavor = .Invalid
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Conversion,
+				message = fmt.tprintf(
+					"Expected integer or string for echo statement, but recieved %s",
+					type_to_string(checked_val.type, context.temp_allocator),
+				),
+			},
+		)
+	}
+
+	if !ECHO_STATEMENT {
+		append(&checker.errors, Type_Error{
+			type = .Internal_Error,
+			message = "Debug-only `echo` statements are not enabled in this build of the compiler."
+		})
+	}
+
+	node.value = checked_val
+	return node, {returns_value = false}
+}
+
+check_return :: proc(
+	checker: ^Checker,
+	node: ^Return_Node,
+) -> (
+	Checked_Statement,
+	Statement_Info,
+) {
 	stmt := checker_new(Checked_Return, checker)
 
 	if node.value != nil {
@@ -444,10 +555,10 @@ check_return :: proc(checker: ^Checker, node: ^Return_Node) -> Checked_Statement
 		)
 	}
 
-	return stmt
+	return stmt, {returns_value = node.value != nil}
 }
 
-check_break :: proc(checker: ^Checker, node: ^Break_Node) -> Checked_Statement {
+check_break :: proc(checker: ^Checker, node: ^Break_Node) -> (Checked_Statement, Statement_Info) {
 	stmt := checker_new(Checked_Break, checker)
 
 	if len(checker.loop_stack) <= 0 {
@@ -462,10 +573,16 @@ check_break :: proc(checker: ^Checker, node: ^Break_Node) -> Checked_Statement {
 		stmt.target = checker.loop_stack[len(checker.loop_stack) - 1]
 	}
 
-	return stmt
+	return stmt, {}
 }
 
-check_continue :: proc(checker: ^Checker, node: ^Continue_Node) -> Checked_Statement {
+check_continue :: proc(
+	checker: ^Checker,
+	node: ^Continue_Node,
+) -> (
+	Checked_Statement,
+	Statement_Info,
+) {
 	stmt := checker_new(Checked_Continue, checker)
 
 	if len(checker.loop_stack) <= 0 {
@@ -480,28 +597,38 @@ check_continue :: proc(checker: ^Checker, node: ^Continue_Node) -> Checked_State
 		stmt.target = checker.loop_stack[len(checker.loop_stack) - 1]
 	}
 
-	return stmt
+	return stmt, {}
 }
 
 
-check_block :: proc(checker: ^Checker, node: ^Block_Node) -> Checked_Statement {
+check_block :: proc(checker: ^Checker, node: ^Block_Node) -> (Checked_Statement, Statement_Info) {
+	info: Statement_Info
 	block := checker_new(Checked_Block, checker)
 	xar.init(&block.statements, checker.allocator)
 
 	push_checker_scope(checker)
 	for iter := xar.iterator(&node.statements); stmt in xar.iterate_by_val(&iter) {
-		xar.append(&block.statements, check_statement(checker, stmt))
+		checked_stmt, stmt_info := check_statement(checker, stmt)
+		xar.append(&block.statements, checked_stmt)
+		info.returns_value ||= stmt_info.returns_value
 	}
 	pop_checker_scope(checker)
 
-	return block
+	return block, info
 }
 
 check_function_declaration :: proc(
 	checker: ^Checker,
 	node: ^Function_Declaration_Node,
-) -> Checked_Statement {
+) -> (
+	Checked_Statement,
+	Statement_Info,
+) {
+	info: Statement_Info
 	decl := checker_new(Checked_Declaration, checker)
+	if checker.function_depth == 0 {
+		decl.is_global = true
+	}
 	decl.name = node.name
 	decl.type = evaluate_type(checker, node)
 	declare_variable_type(checker, decl)
@@ -513,12 +640,18 @@ check_function_declaration :: proc(
 	xar.init(&params, checker.allocator)
 	func := Function {
 		parameters = params,
+		index      = checker.function_index,
+		name       = decl.name,
 	}
+	checker.function_index += 1
 	// CONSIDER: disallow nested functions?
 	last_func := checker.current_function
 	last_sfs := checker.current_stack_frame_size
 	checker.current_function = &func
-	checker.current_stack_frame_size = 0
+
+	// first size_of(Return_Address) bytes are for the return addr
+	checker.current_stack_frame_size = size_of(Return_Address)
+
 	for param in decl.type.(Function_Type).parameters {
 		param_decl := checker_new(Checked_Declaration, checker)
 		param_decl.name = param.name
@@ -527,24 +660,40 @@ check_function_declaration :: proc(
 		xar.append(&func.parameters, param_decl)
 	}
 
-	body := check_block(checker, node.body.(^Block_Node))
+	body, body_info := check_block(checker, node.body.(^Block_Node))
+	func.body = body
 
 	checker.function_depth -= 1
 	pop_checker_scope(checker)
+	func.stack_frame_size = checker.current_stack_frame_size
 	checker.current_function = last_func
 	checker.current_stack_frame_size = last_sfs
+
+	if !body_info.returns_value {
+		append(
+			&checker.errors,
+			Type_Error {
+				message = fmt.tprintf("Not all code paths return a value"),
+				type = .Bad_Control_Flow,
+			},
+		)
+	}
 
 	decl.value = Checked_Expression {
 		variant = func,
 		type    = decl.type,
 	}
-	return decl
+	return decl, info
 }
 
 check_variable_declaration :: proc(
 	checker: ^Checker,
 	node: ^Variable_Declaration_Node,
-) -> Checked_Statement {
+) -> (
+	Checked_Statement,
+	Statement_Info,
+) {
+	info: Statement_Info
 	decl := checker_new(Checked_Declaration, checker)
 	if t, not_inferred := node.type.?; not_inferred {
 		decl.type = evaluate_type(checker, t)
@@ -574,7 +723,7 @@ check_variable_declaration :: proc(
 
 	declare_variable_type(checker, decl)
 
-	return decl
+	return decl, info
 }
 
 is_convertible_from_to :: proc(from: ^Type, to: ^Type) -> bool {
@@ -629,13 +778,25 @@ write_type :: proc(type: ^Type, builder: ^strings.Builder) {
 	fmt.panicf("Very bad type %s", type)
 }
 
-checker_resolve_variable :: proc(checker: ^Checker, name: string) -> (^Checked_Declaration, bool) {
-	#reverse for scope in checker.scopes {
+checker_resolve_variable :: proc(
+	checker: ^Checker,
+	name: string,
+) -> (
+	^Checked_Declaration,
+	bool,
+	bool,
+) {
+	is_global := false
+	#reverse for scope, i in checker.scopes {
 		val, ok := scope.variables[name]
-		if ok do return val, true
+		if i == 0 {
+			is_global = true
+		}
+
+		if ok do return val, is_global, true
 	}
 
-	return nil, false
+	return nil, false, false
 }
 
 evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
@@ -722,12 +883,18 @@ evaluate_type :: proc(checker: ^Checker, node: Node) -> ^Type {
 	return &invalid_type
 }
 
-check_expression_statement :: proc(checker: ^Checker, node: Node) -> Checked_Statement {
+check_expression_statement :: proc(
+	checker: ^Checker,
+	node: Node,
+) -> (
+	Checked_Statement,
+	Statement_Info,
+) {
 	stmt := checker_new(Checked_Expression_Statement, checker)
 
 	stmt.expr = check_expression(checker, node, nil)
 
-	return stmt
+	return stmt, {}
 }
 
 check_expression :: proc(
@@ -763,16 +930,17 @@ check_string_literal :: proc(checker: ^Checker, node: ^String_Node) -> Checked_E
 	expr := checker_new(Checked_String, checker)
 	expr.data = raw_data(interned)
 	expr.len = len(interned)
-	return Checked_Expression{
+	return Checked_Expression {
 		variant = expr,
-		type = get_type(checker, Builtin_Type.String_Literal)
+		type = get_type(checker, Builtin_Type.String_Literal),
 	}
 }
 
 check_variable_read :: proc(checker: ^Checker, node: ^Variable_Read_Node) -> Checked_Expression {
-	var, found := checker_resolve_variable(checker, node.name)
+	var, is_global, found := checker_resolve_variable(checker, node.name)
 	read := checker_new(Checked_Variable_Read, checker)
 	read.decl = var
+	read.is_global = is_global
 	expr := Checked_Expression {
 		variant = read,
 		type    = &invalid_type,
@@ -890,6 +1058,13 @@ type_is_integer :: proc(t: ^Type) -> bool {
 	builtin, is_builtin := t.(Builtin_Type)
 	if !is_builtin do return false
 	return builtin == .Integer_Literal
+}
+
+type_is_string :: proc(t: ^Type) -> bool {
+	t := unwrap_type(t)
+	builtin, is_builtin := t.(Builtin_Type)
+	if !is_builtin do return false
+	return builtin == .String_Literal
 }
 
 type_is_boolean :: proc(t: ^Type) -> bool {
