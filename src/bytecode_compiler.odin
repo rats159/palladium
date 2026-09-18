@@ -306,6 +306,8 @@ declaration_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_Dec
 	if stmt.value != nil {
 		expression_to_bytecode(compiler, stmt.value.?)
 	} else {
+		emit_instruction(compiler, .Push_Bytes)
+		emit_size(compiler, type_size_of(stmt.type))
 		emit_zeroes(compiler, type_size_of(stmt.type))
 	}
 	emit_instruction(compiler, .Get_Register)

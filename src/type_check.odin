@@ -699,20 +699,34 @@ check_variable_declaration :: proc(
 		decl.type = evaluate_type(checker, t)
 	}
 	decl.name = node.name
-	expr := check_expression(checker, node.value, decl.type)
+
+	expr: Maybe(Checked_Expression)
+
+	if node.value != nil {
+		expr = check_expression(checker, node.value.?, decl.type)
+	}
 	decl.value = expr
 
-	if decl.type == nil {
-		decl.type = expr.type
+	if decl.type == nil && expr == nil {
+		decl.type = &invalid_type
+		append(&checker.errors, Type_Error {
+			type = .Bad_Assignment,
+			message = fmt.tprintf("Variable '%s' needs either a type, a value, or both, but has neither.", decl.name)
+		})
+		return decl, info
 	}
-	if !is_convertible_from_to(expr.type, decl.type) {
+
+	if decl.type == nil {
+		decl.type = expr.?.type
+	}
+	if expr != nil && !is_convertible_from_to(expr.?.type, decl.type) {
 		append(
 			&checker.errors,
 			Type_Error {
 				type = .Bad_Conversion,
 				message = fmt.tprintf(
 					"Unable to assign type %s to variable %s with type %s",
-					type_to_string(expr.type, context.temp_allocator),
+					type_to_string(expr.?.type, context.temp_allocator),
 					node.name,
 					type_to_string(decl.type, context.temp_allocator),
 				),

@@ -23,7 +23,7 @@ Write_Node :: struct {
 Variable_Declaration_Node :: struct {
 	name:  string,
 	type:  Maybe(Node),
-	value: Node,
+	value: Maybe(Node),
 }
 
 Parameter_Node :: struct {
@@ -373,8 +373,10 @@ parse_variable_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 		type = parse_type(p) or_return
 	}
 
-	_ = parser_expect(p, .Equals) or_return
-	value := parse_expression(p, .None) or_return
+	value: Maybe(Node)
+	if parser_match(p, .Equals) {
+		value = parse_expression(p, .None) or_return
+	}
 	_ = parser_expect(p, .Semicolon) or_return
 
 	node := make_node(p, Variable_Declaration_Node)
