@@ -28,6 +28,7 @@ Token_Type :: enum {
 	Greater_Equals,
 	Exclamation_Equals,
 	Identifier,
+	Echo,
 	If,
 	Else,
 	While,
@@ -37,10 +38,6 @@ Token_Type :: enum {
 	Close_Curly,
 	Open_Bracket,
 	Close_Bracket,
-	Plus_Equals,
-	Minus_Equals,
-	Star_Equals,
-	Slash_Equals,
 	Function,
 	Return,
 	Comma,
@@ -59,6 +56,7 @@ keywords := #partial [Token_Type]string {
 	.Break    = "break",
 	.Function = "function",
 	.Return   = "return",
+	.Echo     = "echo",
 }
 
 Token :: struct {
@@ -112,29 +110,13 @@ tk_scan :: proc(tk: ^Tokenizer) {
 	case '0' ..= '9':
 		emit_number(tk)
 	case '+':
-		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Plus_Equals, 2)
-		} else {
-			emit_basic(tk, .Plus, 1)
-		}
+		emit_basic(tk, .Plus, 1)
 	case '-':
-		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Minus_Equals, 2)
-		} else {
-			emit_basic(tk, .Minus, 1)
-		}
+		emit_basic(tk, .Minus, 1)
 	case '*':
-		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Star_Equals, 2)
-		} else {
-			emit_basic(tk, .Star, 1)
-		}
+		emit_basic(tk, .Star, 1)
 	case '/':
-		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Slash_Equals, 2)
-		} else {
-			emit_basic(tk, .Slash, 1)
-		}
+		emit_basic(tk, .Slash, 1)
 	case '(':
 		emit_basic(tk, .Open_Paren, 1)
 	case ')':
@@ -144,9 +126,9 @@ tk_scan :: proc(tk: ^Tokenizer) {
 	case '}':
 		emit_basic(tk, .Close_Curly, 1)
 	case '[':
-	    emit_basic(tk, .Open_Bracket, 1)
+		emit_basic(tk, .Open_Bracket, 1)
 	case ']':
-	    emit_basic(tk, .Close_Bracket, 1)
+		emit_basic(tk, .Close_Bracket, 1)
 	case ';':
 		emit_basic(tk, .Semicolon, 1)
 	case ':':
@@ -302,9 +284,23 @@ skip_whitespace :: proc(tk: ^Tokenizer) {
 		switch tk_current_rune(tk) {
 		case ' ', '\t', '\r', '\n':
 			tk_advance_rune(tk)
+		case '/':
+			if tk_next_rune(tk) == '/' {
+				skip_comment(tk)
+			}
 		case:
 			return
 		}
 	}
 }
 
+skip_comment :: proc(tk: ^Tokenizer) {
+	outer: for {
+		switch tk_current_rune(tk) {
+		case '\r', '\n', utf8.RUNE_ERROR:
+			break outer
+		case:
+			tk_advance_rune(tk)
+		}
+	}
+}
