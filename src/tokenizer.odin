@@ -1,6 +1,5 @@
 package palladium
 
-import "base:runtime"
 import "core:unicode/utf8"
 
 Token_Type :: enum {
@@ -72,23 +71,6 @@ Tokenizer :: struct {
 	token:  Token,
 	source: string,
 	offset: int,
-}
-
-tokenize_entire_source :: proc(source: string, allocator: runtime.Allocator) -> []Token {
-	tk := Tokenizer {
-		source = source,
-	}
-	tokens := make([dynamic]Token, allocator)
-	for {
-		tk_scan(&tk)
-		token := tk.token
-		append(&tokens, token)
-		if token.type == .EOF {
-			break
-		}
-	}
-
-	return tokens[:]
 }
 
 tk_current_rune :: proc(tk: ^Tokenizer) -> rune {

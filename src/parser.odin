@@ -4,7 +4,6 @@ package palladium
 import "base:runtime"
 import "core:container/xar"
 import "core:fmt"
-import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
@@ -290,10 +289,10 @@ parse_function_declaration :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Pars
 	_ = parser_expect(p, .Open_Paren) or_return
 
 	for !parser_match(p, .Close_Paren) {
-		name := parser_expect(p, .Identifier) or_return
+		parameter_name := parser_expect(p, .Identifier) or_return
 		_ = parser_expect(p, .Colon) or_return
 		type := parse_type(p) or_return
-		xar.append(&parameters, Parameter_Node{name.value, type})
+		xar.append(&parameters, Parameter_Node{parameter_name.value, type})
 		if parser_match(p, .Close_Paren) {
 			break
 		}
@@ -803,18 +802,6 @@ parser_expect :: proc(p: ^Parser, type: Token_Type) -> (tok: Token, err: Maybe(P
 	}
 
 	return tk, nil
-}
-
-parser_match_any :: proc(p: ^Parser, types: ..Token_Type) -> (Token_Type, bool) {
-	token := parser_current(p)
-	for type in types {
-		if token.type == type {
-			parser_advance(p)
-			return type, true
-		}
-	}
-
-	return {}, false
 }
 
 parser_match :: proc(p: ^Parser, type: Token_Type) -> bool {

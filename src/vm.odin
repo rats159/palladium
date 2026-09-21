@@ -1,6 +1,5 @@
 package palladium
 
-import "base:runtime"
 import "core:container/xar"
 import "core:fmt"
 import "core:mem"
@@ -244,11 +243,6 @@ decode_size :: proc(vm: ^VM) -> Size {
 	assert(len(bytes) == size_of(Size))
 	vm.instruction_pointer += size_of(Size)
 	return slice.to_type(bytes, Size)
-}
-
-decode_byte :: proc(vm: ^VM) -> byte {
-	defer vm.instruction_pointer += 1
-	return vm.active_bytecode[vm.instruction_pointer]
 }
 
 decode_register :: proc(vm: ^VM) -> Register {

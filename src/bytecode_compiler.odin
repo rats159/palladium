@@ -3,8 +3,6 @@ package palladium
 import "base:runtime"
 import "core:container/xar"
 import "core:fmt"
-import "core:log"
-import "core:slice"
 import "core:strings"
 
 Bytecode_Compiler :: struct {
@@ -608,7 +606,7 @@ call_to_bytecode :: proc(compiler: ^Bytecode_Compiler, call: ^Checked_Call, retu
 }
 
 function_to_bytecode :: proc(compiler: ^Bytecode_Compiler, func: Function) {
-	bod, is_block := func.body.(^Checked_Block)
+	_, is_block := func.body.(^Checked_Block)
 	assert(is_block, "Function body is not a block?")
 	last_func := compiler.current_function
 

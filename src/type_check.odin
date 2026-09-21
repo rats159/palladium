@@ -1,10 +1,8 @@
 package palladium
 
-import "base:intrinsics"
 import "base:runtime"
 import "core:container/xar"
 import "core:fmt"
-import "core:log"
 import "core:reflect"
 import "core:strings"
 
@@ -849,9 +847,9 @@ check_variable_declaration :: proc(
 }
 
 is_convertible_from_to :: proc(from: ^Type, to: ^Type) -> bool {
-	from := unwrap_type(from)
-	to := unwrap_type(to)
-	if types_are_equivalent(from, to) {
+	from_unwrapped := unwrap_type(from)
+	to_unwrapped := unwrap_type(to)
+	if types_are_equivalent(from_unwrapped, to_unwrapped) {
 		return true
 	}
 
@@ -1173,39 +1171,39 @@ type_elem_type :: proc(t: ^Type) -> (^Type, bool) {
 	return unwrap_type(t), false
 }
 
-type_is_array :: proc(t: ^Type) -> bool {
-	t := unwrap_type(t)
+type_is_array :: proc(type: ^Type) -> bool {
+	t := unwrap_type(type)
 	_, is_arr := t.(Array_Type)
 	return is_arr
 }
 
-type_as_array :: proc(t: ^Type) -> Array_Type {
-	t := unwrap_type(t)
+type_as_array :: proc(type: ^Type) -> Array_Type {
+	t := unwrap_type(type)
 	return t.(Array_Type)
 }
 
-type_is_function :: proc(t: ^Type) -> bool {
-	t := unwrap_type(t)
+type_is_function :: proc(type: ^Type) -> bool {
+	t := unwrap_type(type)
 	_, is_func := t.(Function_Type)
 	return is_func
 }
 
-type_is_integer :: proc(t: ^Type) -> bool {
-	t := unwrap_type(t)
+type_is_integer :: proc(type: ^Type) -> bool {
+	t := unwrap_type(type)
 	builtin, is_builtin := t.(Builtin_Type)
 	if !is_builtin do return false
 	return builtin == .Integer_Literal
 }
 
-type_is_string :: proc(t: ^Type) -> bool {
-	t := unwrap_type(t)
+type_is_string :: proc(type: ^Type) -> bool {
+	t := unwrap_type(type)
 	builtin, is_builtin := t.(Builtin_Type)
 	if !is_builtin do return false
 	return builtin == .String_Literal
 }
 
-type_is_boolean :: proc(t: ^Type) -> bool {
-	t := unwrap_type(t)
+type_is_boolean :: proc(type: ^Type) -> bool {
+	t := unwrap_type(type)
 	builtin, is_builtin := t.(Builtin_Type)
 	if !is_builtin do return false
 	return builtin == .Bool_Literal
@@ -1380,22 +1378,6 @@ types_are_equivalent :: proc(a_ptr, b_ptr: ^Type, loc := #caller_location) -> bo
 	}
 
 	panic("Bad type type")
-}
-
-converts_to :: proc(t: ^Type, target: ^Type) -> bool {
-	if t == nil {
-		return false
-	}
-
-	if target == nil {
-		return false
-	}
-
-	if types_are_equivalent(unwrap_type(t), unwrap_type(target)) {
-		return true
-	}
-
-	return false
 }
 
 check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Checked_Expression {
@@ -1583,14 +1565,6 @@ check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Che
 	// 	},
 	// )
 	return expr
-}
-
-make_type :: proc(
-	checker: ^Checker,
-	$T: typeid,
-) -> ^T where intrinsics.type_is_variant_of(Type, ^T) {
-	type := new(T, checker.allocator)
-	return type
 }
 
 checker_new :: proc($T: typeid, checker: ^Checker) -> ^T {
