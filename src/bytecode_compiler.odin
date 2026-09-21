@@ -18,9 +18,9 @@ Function_Chunk :: struct {
 	bytecode:          [dynamic]byte,
 	pending_breaks:    map[Checked_Statement]int,
 	pending_continues: map[Checked_Statement]int,
-	name: string,
-	index: i64,
-	stack_frame_size: i64,
+	name:              string,
+	index:             i64,
+	stack_frame_size:  i64,
 }
 
 Instruction :: enum u8 {
@@ -69,11 +69,10 @@ program_to_bytecode :: proc(
 	compiler.allocator = allocator
 	compiler.chunks.allocator = allocator
 	compiler.globals_top = program.globals_top
-	open_new_function_chunk(&compiler, {
-		index = 0,
-		name = "$Global",
-		stack_frame_size = Size(program.globals_top),
-	})
+	open_new_function_chunk(
+		&compiler,
+		{index = 0, name = "$Global", stack_frame_size = Size(program.globals_top)},
+	)
 
 	for iter := xar.iterator(&program.statements); stmt in xar.iterate_by_val(&iter) {
 		top_level_declaration_to_bytecode(&compiler, stmt)
@@ -577,7 +576,7 @@ emit_return_address :: proc(compiler: ^Bytecode_Compiler) -> int {
 	backpatch_offset := emit_backpatchable_offset(compiler)
 	emit_instruction(compiler, .Get_Register)
 	emit_register(compiler, .Stack_Pointer)
-	
+
 	return backpatch_offset
 }
 

@@ -765,7 +765,11 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
 		return parse_compound(p)
 	}
 
-	return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Token %s has no value", tok.type)}
+	if tok.type == .EOF {
+		return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Unexpected end of file when parsing expression")}
+	} else {
+		return {}, Parser_Error{type = .Invalid_Value, message = fmt.tprintf("Token '%s' has no value", tok.value)}
+	}
 }
 
 parse_compound :: proc(p: ^Parser) -> (_e: Node, _r: Maybe(Parser_Error)) {

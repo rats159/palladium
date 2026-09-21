@@ -17,9 +17,9 @@ Command_Info :: struct {
 }
 
 help_messages := [Subcommand]Command_Info {
-	.Help = {"help      ", "Displays this message"},
-	.Run  = {"run <path>", "Compiles and runs the code at <path>"},
-	.Disassemble  = {"disassemble <path>", "Compiles the code at <path> and prints its bytecode"},
+	.Help        = {"help      ", "Displays this message"},
+	.Run         = {"run <path>", "Compiles and runs the code at <path>"},
+	.Disassemble = {"disassemble <path>", "Compiles the code at <path> and prints its bytecode"},
 }
 
 main :: proc() {
@@ -54,7 +54,7 @@ run_program :: proc(filepath: string) {
 	}
 
 	ast, parser_error := parse_file(string(file_source), alloc)
-	
+
 	if parser_error != nil {
 		print_parser_error(parser_error.?)
 		return
@@ -93,7 +93,7 @@ disassemble_program :: proc(filepath: string) {
 	}
 
 	ast, parser_error := parse_file(string(file_source), alloc)
-	
+
 	if parser_error != nil {
 		print_parser_error(parser_error.?)
 		return

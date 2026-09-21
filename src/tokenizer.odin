@@ -308,3 +308,4 @@ skip_comment :: proc(tk: ^Tokenizer) {
 		}
 	}
 }
+

@@ -5,6 +5,7 @@ import "core:container/xar"
 import "core:fmt"
 import "core:mem"
 import "core:slice"
+
 VM :: struct {
 	active_bytecode:     []byte,
 	instruction_pointer: i64,

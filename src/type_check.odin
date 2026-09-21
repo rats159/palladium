@@ -139,8 +139,8 @@ Checked_Declaration :: struct {
 }
 
 Lvalue_Declaration :: struct {
-	offset:    Offset,
-	value:     Checked_Expression,
+	offset: Offset,
+	value:  Checked_Expression,
 }
 
 Checked_Block :: struct {
@@ -162,7 +162,7 @@ Checked_For :: struct {
 	iterand:            Checked_Expression,
 	iteration_variable: ^Checked_Declaration,
 	index_offset:       Offset,
-	iterand_store:  	Maybe(^Lvalue_Declaration)
+	iterand_store:      Maybe(^Lvalue_Declaration),
 }
 
 Checked_Expression_Statement :: struct {
@@ -197,7 +197,7 @@ Checked_Expression :: struct {
 }
 
 Lvalue_Read :: struct {
-	decl: ^Lvalue_Declaration
+	decl: ^Lvalue_Declaration,
 }
 
 Array_Literal :: struct {
@@ -460,9 +460,12 @@ check_for :: proc(checker: ^Checker, node: ^For_Node) -> (Checked_Statement, Sta
 
 		value_read := checker_new(Lvalue_Read, checker)
 		value_read.decl = value_decl
-		stmt.iterand = Checked_Expression{variant = value_read, type = iterand.type}
+		stmt.iterand = Checked_Expression {
+			variant = value_read,
+			type    = iterand.type,
+		}
 	}
-	
+
 	stmt.index_offset = advance_stack_frame_offset(
 		checker,
 		get_type(checker, Builtin_Type.Integer_Literal),
@@ -617,10 +620,13 @@ check_echo :: proc(checker: ^Checker, node: ^Echo_Node) -> (Checked_Statement, S
 	}
 
 	if !ECHO_STATEMENT {
-		append(&checker.errors, Type_Error{
-			type = .Internal_Error,
-			message = "Debug-only `echo` statements are not enabled in this build of the compiler."
-		})
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Internal_Error,
+				message = "Debug-only `echo` statements are not enabled in this build of the compiler.",
+			},
+		)
 	}
 
 	node.value = checked_val
@@ -805,10 +811,16 @@ check_variable_declaration :: proc(
 
 	if decl.type == nil && expr == nil {
 		decl.type = &invalid_type
-		append(&checker.errors, Type_Error {
-			type = .Bad_Assignment,
-			message = fmt.tprintf("Variable '%s' needs either a type, a value, or both, but has neither.", decl.name)
-		})
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Assignment,
+				message = fmt.tprintf(
+					"Variable '%s' needs either a type, a value, or both, but has neither.",
+					decl.name,
+				),
+			},
+		)
 		return decl, info
 	}
 
@@ -1167,6 +1179,7 @@ type_is_array :: proc(t: ^Type) -> bool {
 	return is_arr
 }
 
+type_as_array :: proc(t: ^Type) -> Array_Type {
 	t := unwrap_type(t)
 	return t.(Array_Type)
 }

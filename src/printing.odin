@@ -9,3 +9,4 @@ print_parser_error :: proc(err: Parser_Error) {
 print_checker_error :: proc(err: Type_Error) {
 	fmt.eprintln(err.message)
 }
+

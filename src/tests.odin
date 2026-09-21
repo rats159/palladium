@@ -870,7 +870,7 @@ import "core:testing"
 // test_variable_slots_with_func :: proc(t: ^testing.T) {
 // 	ast, err := parse_file(
 // 		`
-// var a = 1; 
+// var a = 1;
 // var b = true;
 // var c = true;
 // function test(): int {
@@ -878,7 +878,7 @@ import "core:testing"
 // 	var b = 2;
 // 	var c = 1000;
 // 	return a + b;
-// } 
+// }
 // var d = 1;
 // `,
 // 		context.temp_allocator,
