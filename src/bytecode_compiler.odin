@@ -155,14 +155,18 @@ statement_to_bytecode :: proc(compiler: ^Bytecode_Compiler, statement: Checked_S
 		write_to_bytecode(compiler, type)
 	case ^Checked_Expression_Statement:
 		checked_expression_statement_to_bytecode(compiler, type)
-	case ^Checked_Loop:
-		loop_to_bytecode(compiler, type)
+	case ^Checked_While:
+		while_to_bytecode(compiler, type)
+	case ^Checked_For:
+		for_to_bytecode(compiler, type)
 	case ^Checked_If:
 		if_to_bytecode(compiler, type)
 	case ^Checked_Block:
 		checked_block_to_bytecode(compiler, type)
 	case ^Checked_Declaration:
 		declaration_to_bytecode(compiler, type)
+	case ^Lvalue_Declaration:
+		lvalue_declaration_to_bytecode(compiler, type)
 	case ^Checked_Break:
 		break_to_bytecode(compiler, type)
 	case ^Checked_Continue:
@@ -196,6 +200,8 @@ expression_to_address_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: Check
 	#partial switch type in expr.variant {
 	case ^Checked_Variable_Read:
 		variable_read_to_address_bytecode(compiler, type)
+	case ^Lvalue_Read:
+		lvalue_read_to_address_bytecode(compiler, type)
 	case ^Checked_Array_Index:
 		array_index_to_address_bytecode(compiler, type, expr.type)
 	case:
@@ -215,6 +221,15 @@ array_index_to_address_bytecode :: proc(
 	emit_size(compiler, type_size_of(element_type))
 	emit_instruction(compiler, .Mul_I64)
 	emit_instruction(compiler, .Add_I64)
+}
+
+lvalue_read_to_address_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: ^Lvalue_Read) {
+	emit_instruction(compiler, .Get_Register)
+	emit_register(compiler, .Stack_Pointer)
+	emit_instruction(compiler, .Push_Bytes)
+	emit_size(compiler, Size(size_of(Offset)))
+	emit_offset(compiler, expr.decl.offset)
+	emit_instruction(compiler, .Add_Pointer)
 }
 
 variable_read_to_address_bytecode :: proc(
@@ -251,7 +266,7 @@ checked_expression_statement_to_bytecode :: proc(
 	emit_size(compiler, size)
 }
 
-loop_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_Loop) {
+while_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_While) {
 	condition_start := Offset(len(compiler.current_function.bytecode))
 	expression_to_bytecode(compiler, stmt.condition)
 	emit_instruction(compiler, .Jump_If_False)
@@ -280,6 +295,167 @@ loop_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_Loop) {
 	}
 }
 
+emit_get_length :: proc(compiler: ^Bytecode_Compiler, type: ^Type) {
+	if type_is_array(type) {
+		arr := type_as_array(type)
+		emit_instruction(compiler, .Push_Bytes)
+		emit_size(compiler, size_of(i64))
+		emit_i64(compiler, i64(arr.length))
+	} else {
+		panic("Cant get the length of this type")
+	}
+}
+
+for_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_For) {
+	// Pre-loop:
+	// - Staging iterand on the stack
+	// - Set index to zero
+	Pre_Loop: {
+		Store_Iterand: {
+			if stmt.iterand_store != nil {
+				lvalue_declaration_to_bytecode(compiler, stmt.iterand_store.?)
+			}
+		}
+
+		Store_Index: {
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, size_of(i64))
+			emit_zeroes(compiler, size_of(i64))
+
+			emit_instruction(compiler, .Get_Register)
+			emit_register(compiler, .Stack_Pointer)
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, Size(size_of(Offset)))
+			emit_offset(compiler, stmt.index_offset)
+			emit_instruction(compiler, .Add_Pointer)
+
+			emit_instruction(compiler, .Memory_Write)
+			emit_size(compiler, size_of(i64))
+		}
+	}
+
+	// Loop start:
+	// - Check length
+	// - Update iteration variable
+
+	loop_start_address := Offset(len(compiler.current_function.bytecode))
+	loop_end_backpatch: int
+	Loop_Start: {
+		Check_Length: {
+			emit_instruction(compiler, .Get_Register)
+			emit_register(compiler, .Stack_Pointer)
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, Size(size_of(Offset)))
+			emit_offset(compiler, stmt.index_offset)
+			emit_instruction(compiler, .Add_Pointer)
+
+			emit_instruction(compiler, .Memory_Read)
+			emit_size(compiler, size_of(i64))
+
+			emit_get_length(compiler, stmt.iterand.type)
+
+			emit_instruction(compiler, .Less_Than_I64)
+
+			emit_instruction(compiler, .Jump_If_False)
+			loop_end_backpatch = emit_backpatchable_offset(compiler)
+		}
+
+		Update_Iteration: {
+			expression_to_address_bytecode(compiler, stmt.iterand)
+
+			emit_instruction(compiler, .Get_Register)
+			emit_register(compiler, .Stack_Pointer)
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, Size(size_of(Offset)))
+			emit_offset(compiler, stmt.index_offset)
+			emit_instruction(compiler, .Add_Pointer)
+			emit_instruction(compiler, .Memory_Read)
+			emit_size(compiler, size_of(i64))
+
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, size_of(Size))
+			elem_type, is_valid := type_elem_type(stmt.iterand.type)
+			assert(is_valid, "Non-collection type wound up in for loop lowering")
+			emit_size(compiler, type_size_of(elem_type))
+			emit_instruction(compiler, .Mul_I64)
+			emit_instruction(compiler, .Add_I64)
+
+			emit_instruction(compiler, .Memory_Read)
+			emit_size(compiler, type_size_of(elem_type))
+
+			emit_instruction(compiler, .Get_Register)
+			emit_register(compiler, .Stack_Pointer)
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, Size(size_of(Offset)))
+			emit_offset(compiler, stmt.iteration_variable.offset)
+			emit_instruction(compiler, .Add_Pointer)
+			emit_instruction(compiler, .Memory_Write)
+			emit_size(compiler, type_size_of(elem_type))
+		}
+	}
+
+	statement_to_bytecode(compiler, stmt.body)
+
+	// Loop end: Continues go here
+	// - Increment index
+	// - Go back to start
+	Loop_End: {
+		Update_Index: {
+			emit_instruction(compiler, .Get_Register)
+			emit_register(compiler, .Stack_Pointer)
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, Size(size_of(Offset)))
+			emit_offset(compiler, stmt.index_offset)
+			emit_instruction(compiler, .Add_Pointer)
+
+			emit_instruction(compiler, .Memory_Read)
+			emit_size(compiler, size_of(i64))
+
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, size_of(i64))
+			emit_i64(compiler, 1)
+			emit_instruction(compiler, .Add_I64)
+
+			emit_instruction(compiler, .Get_Register)
+			emit_register(compiler, .Stack_Pointer)
+			emit_instruction(compiler, .Push_Bytes)
+			emit_size(compiler, Size(size_of(Offset)))
+			emit_offset(compiler, stmt.index_offset)
+			emit_instruction(compiler, .Add_Pointer)
+
+			emit_instruction(compiler, .Memory_Write)
+			emit_size(compiler, size_of(i64))
+		}
+
+		Jump_To_Start: {
+			emit_instruction(compiler, .Jump)
+			emit_offset(compiler, loop_start_address)
+		}
+	}
+
+	backpatch_offset(compiler, loop_end_backpatch)
+	after_loop_address := Offset(len(compiler.current_function.bytecode))
+
+
+	for node, offset in compiler.current_function.pending_breaks {
+		if node == stmt {
+			region := compiler.current_function.bytecode[offset:offset + size_of(Offset)]
+			bytes := transmute([8]byte)after_loop_address
+			copy(region, bytes[:])
+			delete_key(&compiler.current_function.pending_breaks, node)
+		}
+	}
+
+	for node, offset in compiler.current_function.pending_continues {
+		if node == stmt {
+			region := compiler.current_function.bytecode[offset:offset + size_of(Offset)]
+			bytes := transmute([8]byte)loop_start_address
+			copy(region, bytes[:])
+			delete_key(&compiler.current_function.pending_continues, node)
+		}
+	}
+}
+
 if_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_If) {
 	expression_to_bytecode(compiler, stmt.condition)
 	emit_instruction(compiler, .Jump_If_False)
@@ -300,6 +476,18 @@ checked_block_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_B
 	for iter := xar.iterator(&stmt.statements); substmt in xar.iterate_by_val(&iter) {
 		statement_to_bytecode(compiler, substmt)
 	}
+}
+
+lvalue_declaration_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Lvalue_Declaration) {
+	expression_to_bytecode(compiler, stmt.value)
+	emit_instruction(compiler, .Get_Register)
+	emit_register(compiler, .Stack_Pointer)
+	emit_instruction(compiler, .Push_Bytes)
+	emit_size(compiler, Size(size_of(Offset)))
+	emit_offset(compiler, stmt.offset)
+	emit_instruction(compiler, .Add_I64)
+	emit_instruction(compiler, .Memory_Write)
+	emit_size(compiler, type_size_of(stmt.value.type))
 }
 
 declaration_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_Declaration) {
@@ -364,9 +552,22 @@ expression_to_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: Checked_Expre
 		call_to_bytecode(compiler, type, expr.type)
 	case ^Array_Literal:
 		array_literal_to_bytecode(compiler, type, expr.type)
+	case ^Lvalue_Read:
+		lvalue_expression_to_bytecode(compiler, type, expr.type)
 	}
 
 	return type_size_of(expr.type)
+}
+
+lvalue_expression_to_bytecode :: proc(
+	compiler: ^Bytecode_Compiler,
+	node: ^Lvalue_Read,
+	type: ^Type,
+) {
+	lvalue_read_to_address_bytecode(compiler, node)
+
+	emit_instruction(compiler, .Memory_Read)
+	emit_size(compiler, type_size_of(type))
 }
 
 emit_return_address :: proc(compiler: ^Bytecode_Compiler) -> int {

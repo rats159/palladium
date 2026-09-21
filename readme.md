@@ -1,5 +1,6 @@
 # Palladium Programming Language
 
+## TODOs
 I don't know much about where this'll go, but here're the plans
 - [x] Basic number tokenizing
 - [x] Operator tokenizing
@@ -22,12 +23,15 @@ I don't know much about where this'll go, but here're the plans
 - [x] Arrays
 - [x] Internal improvements to support bytecode
 - [x] Bytecode
-- [ ] For loops
-- [ ] Foreign Functions
+- [x] CLI (`palladium run test.pd`, etc)
+- [x] For loops
+- [ ] Syntax Rework
+- [ ] Structs
 - [ ] Imports
-- [ ] CLI (`palladium run test.pd`, etc)
 
-should be enough to be somewhat usable. 
+
+## Smaller TODOs
+- [ ] Fix unary ops
 
 ---
 

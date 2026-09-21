@@ -34,6 +34,8 @@ Token_Type :: enum {
 	While,
 	Continue,
 	Break,
+	For,
+	In,
 	Open_Curly,
 	Close_Curly,
 	Open_Bracket,
@@ -57,6 +59,8 @@ keywords := #partial [Token_Type]string {
 	.Function = "function",
 	.Return   = "return",
 	.Echo     = "echo",
+	.For      = "for",
+	.In       = "in",
 }
 
 Token :: struct {

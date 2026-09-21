@@ -80,7 +80,7 @@ Checker :: struct {
 	function_depth:           int,
 	current_function:         ^Function,
 	current_stack_frame_size: Size,
-	loop_stack:               [dynamic]^Checked_Loop,
+	loop_stack:               [dynamic]Checked_Statement,
 	allocator:                runtime.Allocator,
 	// CONSIDER: this thing's lifetime is weird
 	//           it can just leak for now
@@ -97,7 +97,8 @@ Checked_Program :: struct {
 Checked_Statement :: union {
 	^Checked_Write,
 	^Checked_Expression_Statement,
-	^Checked_Loop,
+	^Checked_While,
+	^Checked_For,
 	^Checked_If,
 	^Checked_Block,
 	^Checked_Declaration,
@@ -105,6 +106,7 @@ Checked_Statement :: union {
 	^Checked_Continue,
 	^Checked_Return,
 	^Checked_Echo,
+	^Lvalue_Declaration,
 }
 
 Checked_Return :: struct {
@@ -136,6 +138,11 @@ Checked_Declaration :: struct {
 	is_global: bool,
 }
 
+Lvalue_Declaration :: struct {
+	offset:    Offset,
+	value:     Checked_Expression,
+}
+
 Checked_Block :: struct {
 	statements: xar.Array(Checked_Statement, 4),
 }
@@ -145,10 +152,17 @@ Checked_If :: struct {
 	body:      Checked_Statement,
 	else_body: Maybe(Checked_Statement),
 }
-
-Checked_Loop :: struct {
+Checked_While :: struct {
 	body:      Checked_Statement,
 	condition: Checked_Expression,
+}
+
+Checked_For :: struct {
+	body:               Checked_Statement,
+	iterand:            Checked_Expression,
+	iteration_variable: ^Checked_Declaration,
+	index_offset:       Offset,
+	iterand_store:  	Maybe(^Lvalue_Declaration)
 }
 
 Checked_Expression_Statement :: struct {
@@ -178,7 +192,12 @@ Checked_Expression :: struct {
 		^Checked_Variable_Read,
 		^Checked_Call,
 		^Array_Literal,
+		^Lvalue_Read,
 	},
+}
+
+Lvalue_Read :: struct {
+	decl: ^Lvalue_Declaration
 }
 
 Array_Literal :: struct {
@@ -314,6 +333,16 @@ pop_checker_scope :: proc(checker: ^Checker) {
 	delete_scope(scope)
 }
 
+advance_stack_frame_offset :: proc(checker: ^Checker, t: ^Type) -> Offset {
+	current_offset := Offset(checker.current_stack_frame_size)
+	alignment := Offset(type_align_of(t))
+	size := Offset(type_size_of(t))
+	offset := ((current_offset + (alignment - 1)) & ~(alignment - 1))
+	checker.current_stack_frame_size = Size(offset + size)
+
+	return offset
+}
+
 declare_variable_type :: proc(checker: ^Checker, decl: ^Checked_Declaration) {
 	scope := &checker.scopes[len(checker.scopes) - 1]
 
@@ -326,11 +355,7 @@ declare_variable_type :: proc(checker: ^Checker, decl: ^Checked_Declaration) {
 			},
 		)
 	} else {
-		current_offset := Offset(checker.current_stack_frame_size)
-		alignment := Offset(type_align_of(decl.type))
-		size := Offset(type_size_of(decl.type))
-		decl.offset = ((current_offset + (alignment - 1)) & ~(alignment - 1))
-		checker.current_stack_frame_size = Size(decl.offset + size)
+		decl.offset = advance_stack_frame_offset(checker, decl.type)
 		scope.variables[decl.name] = decl
 	}
 }
@@ -383,8 +408,77 @@ check_write :: proc(checker: ^Checker, node: ^Write_Node) -> (Checked_Statement,
 	return statement, info
 }
 
+expression_lives_on_variable_stack :: proc(node: Checked_Expression) -> bool {
+	#partial switch type in node.variant {
+	case ^Checked_Variable_Read:
+		return true
+	case ^Checked_Array_Index:
+		return expression_lives_on_variable_stack(type.array)
+	}
+	return false
+}
+
+check_for :: proc(checker: ^Checker, node: ^For_Node) -> (Checked_Statement, Statement_Info) {
+	stmt := checker_new(Checked_For, checker)
+
+	push_checker_scope(checker)
+	defer pop_checker_scope(checker)
+
+	iterand := check_expression(checker, node.iterand, nil)
+	stmt.iterand = iterand
+
+	if !type_is_array(iterand.type) {
+		append(
+			&checker.errors,
+			Type_Error {
+				type = .Bad_Conversion,
+				message = fmt.tprintf(
+					"Expected an array type for a for-loop iterand, but got a %s.",
+					type_to_string(iterand.type, context.temp_allocator),
+				),
+			},
+		)
+	}
+
+	iteration_type, has_elements := type_elem_type(iterand.type)
+	assert(has_elements, "type_elem_type is wrong probably")
+
+	iteration_variable := checker_new(Checked_Declaration, checker)
+	iteration_variable.is_global = false
+	iteration_variable.name = node.iteration_variable
+	iteration_variable.type = iteration_type
+	iteration_variable.value = nil
+	declare_variable_type(checker, iteration_variable)
+	stmt.iteration_variable = iteration_variable
+
+	// Fake variable to hold rvalue iterands
+	if !expression_lives_on_variable_stack(iterand) {
+		value_decl := checker_new(Lvalue_Declaration, checker)
+		value_decl.value = iterand
+		value_decl.offset = advance_stack_frame_offset(checker, iterand.type)
+		stmt.iterand_store = value_decl
+
+		value_read := checker_new(Lvalue_Read, checker)
+		value_read.decl = value_decl
+		stmt.iterand = Checked_Expression{variant = value_read, type = iterand.type}
+	}
+	
+	stmt.index_offset = advance_stack_frame_offset(
+		checker,
+		get_type(checker, Builtin_Type.Integer_Literal),
+	)
+
+
+	append(&checker.loop_stack, stmt)
+
+	body, info := check_statement(checker, node.body)
+	stmt.body = body
+	pop(&checker.loop_stack)
+	return stmt, info
+}
+
 check_while :: proc(checker: ^Checker, node: ^While_Node) -> (Checked_Statement, Statement_Info) {
-	stmt := checker_new(Checked_Loop, checker)
+	stmt := checker_new(Checked_While, checker)
 	cond := check_expression(checker, node.condition, get_type(checker, Builtin_Type.Bool_Literal))
 
 	stmt.condition = cond
@@ -478,6 +572,8 @@ check_statement :: proc(checker: ^Checker, stmt: Node) -> (Checked_Statement, St
 		return check_block(checker, type)
 	case ^While_Node:
 		return check_while(checker, type)
+	case ^For_Node:
+		return check_for(checker, type)
 	case ^If_Node:
 		return check_if(checker, type)
 	case ^Function_Declaration_Node:
@@ -934,7 +1030,10 @@ check_expression :: proc(
 	case ^Boolean_Node:
 		return {type = get_type(checker, Builtin_Type.Bool_Literal), variant = type}
 	case:
-		fmt.panicf("Impossible expression type '%s'", reflect.union_variant_typeid(node))
+		fmt.panicf(
+			"Internal error: '%s' is not an expression that can be checked",
+			reflect.union_variant_typeid(node),
+		)
 
 	}
 }
@@ -1055,10 +1154,21 @@ check_compound :: proc(
 	return invalid_expression
 }
 
+type_elem_type :: proc(t: ^Type) -> (^Type, bool) {
+	if type_is_array(t) {
+		return type_as_array(t).elem_type, true
+	}
+	return unwrap_type(t), false
+}
+
 type_is_array :: proc(t: ^Type) -> bool {
 	t := unwrap_type(t)
 	_, is_arr := t.(Array_Type)
 	return is_arr
+}
+
+	t := unwrap_type(t)
+	return t.(Array_Type)
 }
 
 type_is_function :: proc(t: ^Type) -> bool {

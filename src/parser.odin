@@ -115,6 +115,12 @@ While_Node :: struct {
 	body:      Node,
 }
 
+For_Node :: struct {
+	iteration_variable: string,
+	iterand:            Node,
+	body:               Node,
+}
+
 Call_Node :: struct {
 	callee:    Node,
 	arguments: xar.Array(Node, 4),
@@ -137,6 +143,7 @@ Node :: union {
 	^Write_Node,
 	^If_Node,
 	^While_Node,
+	^For_Node,
 	^Continue_Node,
 	^Break_Node,
 	^Function_Declaration_Node,
@@ -214,6 +221,8 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 		return parse_if_statement(p)
 	case .While:
 		return parse_while_statement(p)
+	case .For:
+		return parse_for_statement(p)
 	case .Continue:
 		_ = parser_expect(p, .Continue) or_return
 		_ = parser_expect(p, .Semicolon) or_return
@@ -339,6 +348,33 @@ parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error
 	node.condition = condition
 	node.body = body
 	node.else_body = else_body
+
+	return node, nil
+}
+
+parse_for_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
+	_ = parser_expect(p, .For) or_return
+	// FUTURE: C-style for loops
+
+	loop_variable := parser_expect(p, .Identifier) or_return
+	_ = parser_expect(p, .In) or_return
+
+	iterand: Node
+	{
+		old_compound_rule := p.allow_compound_literal
+		defer p.allow_compound_literal = old_compound_rule
+		p.allow_compound_literal = false
+		iterand = parse_expression(p, .None) or_return
+	}
+
+	_ = parser_expect(p, .Open_Curly) or_return
+	body := parse_statement_list(p, .Close_Curly) or_return
+
+	node := make_node(p, For_Node)
+
+	node.iteration_variable = loop_variable.value
+	node.iterand = iterand
+	node.body = body
 
 	return node, nil
 }
