@@ -181,6 +181,7 @@ Checked_Expression :: struct {
 	type:    ^Type,
 	variant: union {
 		^Checked_Binary_Op,
+		^Checked_Unary_Op,
 		^Checked_Array_Index,
 		// FUTURE: other bool/int/string types
 		^Boolean_Node,
@@ -222,6 +223,17 @@ Checked_Binary_Op :: struct {
 	left:  Checked_Expression,
 	right: Checked_Expression,
 	op:    Checked_Binary_Operation,
+}
+
+Checked_Unary_Op :: struct {
+	operand: Checked_Expression,
+	op:      Checked_Unary_Operation,
+}
+
+Checked_Unary_Operation :: enum {
+	Invalid = 0,
+	Negate_I64,
+	Not_Bool,
 }
 
 Checked_Binary_Operation :: enum {
@@ -1025,6 +1037,8 @@ check_expression :: proc(
 	#partial switch type in node {
 	case ^Binary_Op_Node:
 		return check_binary_expression(checker, type)
+	case ^Unary_Op_Node:
+		return check_unary_expression(checker, type)
 	case ^Variable_Read_Node:
 		return check_variable_read(checker, type)
 	case ^Compound_Node:
@@ -1380,6 +1394,70 @@ types_are_equivalent :: proc(a_ptr, b_ptr: ^Type, loc := #caller_location) -> bo
 	panic("Bad type type")
 }
 
+check_unary_expression :: proc(checker: ^Checker, node: ^Unary_Op_Node) -> Checked_Expression {
+	operand := check_expression(checker, node.node, nil)
+
+	if node.op == .Nothingation {
+		return operand
+	}
+
+	checked_node := checker_new(Checked_Unary_Op, checker)
+
+
+	checked_node.operand = operand
+
+	expr := Checked_Expression {
+		variant = checked_node,
+		type    = &invalid_type,
+	}
+
+	switch node.op {
+	case .Invalid:
+		panic("Invalid operation")
+	case .Nothingation:
+		if type_is_integer(operand.type) {
+			return operand
+		} else {
+			append(
+				&checker.errors,
+				Type_Error{type = .Bad_Operator, message = "Expected integer types for prefix plus"},
+			)
+		}
+	case .Negation:
+		if type_is_integer(operand.type) {
+			checked_node.op = .Negate_I64
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected an integer type for unary negation",
+				},
+			)
+		}
+	case .Logical_Not:
+		if type_is_boolean(operand.type) {
+			checked_node.op = .Not_Bool
+		} else {
+			append(
+				&checker.errors,
+				Type_Error {
+					type = .Bad_Operator,
+					message = "Expected a boolean type for logical not",
+				},
+			)
+		}
+	}
+
+	switch checked_node.op {
+	case .Invalid:
+		expr.type = &invalid_type
+	case .Negate_I64, .Not_Bool:
+		expr.type = checked_node.operand.type
+	}
+	return expr
+}
+
 check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Checked_Expression {
 	checked_node := checker_new(Checked_Binary_Op, checker)
 
@@ -1551,19 +1629,6 @@ check_binary_expression :: proc(checker: ^Checker, node: ^Binary_Op_Node) -> Che
 	     .Boolean_And:
 		expr.type = get_type(checker, Builtin_Type.Bool_Literal)
 	}
-
-	// append(
-	// 	&checker.errors,
-	// 	Type_Error {
-	// 		type = .Bad_Operator,
-	// 		message = fmt.tprintf(
-	// 			"Unable to use operator %s on types %s and %s",
-	// 			op,
-	// 			type_to_string(left.type, context.temp_allocator),
-	// 			type_to_string(right.type, context.temp_allocator),
-	// 		),
-	// 	},
-	// )
 	return expr
 }
 

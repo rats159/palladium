@@ -146,6 +146,9 @@ execute_instruction :: proc(vm: ^VM) -> bool {
 		b := pop_i64(vm)
 		a := pop_i64(vm)
 		push_i64(vm, a / b)
+	case .Negate_I64:
+		a := pop_i64(vm)
+		push_i64(vm, -a)
 	case .Or_Bool:
 		b := pop_bool(vm)
 		a := pop_bool(vm)

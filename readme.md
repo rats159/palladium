@@ -29,10 +29,6 @@ I don't know much about where this'll go, but here're the plans
 - [ ] Structs
 - [ ] Imports
 
-
-## Smaller TODOs
-- [ ] Fix unary ops
-
 ---
 
 I plan to make this language somewhat C-like. If I make something more (Rust or Haskell)-like, it'll be called Tellurium. If I make something object-oriented it'll be called Zirconium. If I make those languages and remember, I'll link them here.

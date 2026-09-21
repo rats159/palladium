@@ -29,10 +29,11 @@ Instruction :: enum u8 {
 	Sub_I64,
 	Mul_I64,
 	Div_I64,
+	Negate_I64,
 	Add_Pointer,
-	Invert_Bool,
 	Or_Bool,
 	And_Bool,
+	Invert_Bool,
 	Less_Than_I64,
 	Less_Than_Or_Equal_To_I64,
 	Greater_Than_I64,
@@ -533,6 +534,8 @@ expression_to_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: Checked_Expre
 	switch type in expr.variant {
 	case ^Checked_Binary_Op:
 		binary_expression_to_bytecode(compiler, type, expr.type)
+	case ^Checked_Unary_Op:
+		unary_expression_to_bytecode(compiler, type, expr.type)
 	case ^Checked_Array_Index:
 		array_index_to_bytecode(compiler, type, expr.type)
 	case ^Boolean_Node:
@@ -698,6 +701,23 @@ boolean_literal_to_bytecode :: proc(
 	emit_bool(compiler, expr.value)
 }
 
+unary_expression_to_bytecode :: proc(
+	compiler: ^Bytecode_Compiler,
+	expr: ^Checked_Unary_Op,
+	type: ^Type,
+) {
+	expression_to_bytecode(compiler, expr.operand)
+
+	switch expr.op {
+	case .Invalid:
+		panic("Invalid operation")
+	case .Negate_I64:
+		emit_instruction(compiler, .Negate_I64)
+	case .Not_Bool:
+		emit_instruction(compiler, .Invert_Bool)
+	}
+}
+
 binary_expression_to_bytecode :: proc(
 	compiler: ^Bytecode_Compiler,
 	expr: ^Checked_Binary_Op,
@@ -834,17 +854,18 @@ disassemble_bytecode :: proc(chunk: Function_Chunk) {
 		case .Sub_I64: /*nothing*/
 		case .Mul_I64: /*nothing*/
 		case .Div_I64: /*nothing*/
+		case .Negate_I64: /*nothing*/
 		case .Print_I64: /*nothing*/
 		case .Print_String: /*nothing*/
 		case .Print_Function: /*nothing*/
 		case .Add_Pointer: /*nothing*/
 		case .Or_Bool: /*nothing*/
 		case .And_Bool: /*nothing*/
+		case .Invert_Bool: /*nothing*/
 		case .Less_Than_I64: /*nothing*/
 		case .Less_Than_Or_Equal_To_I64: /*nothing*/
 		case .Greater_Than_I64: /*nothing*/
 		case .Greater_Than_Or_Equal_To_I64: /*nothing*/
-		case .Invert_Bool: /*nothing*/
 
 		}
 		fmt.sbprintln(&buffer)
