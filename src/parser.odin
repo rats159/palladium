@@ -689,7 +689,7 @@ parse_string :: proc(p: ^Parser, value: string) -> (_val: string, _ok: bool) {
 		}
 	}
 
-	return strings.to_string(buf), false
+	return strings.to_string(buf), true
 }
 
 parse_integer :: proc(value: string) -> i64 {
