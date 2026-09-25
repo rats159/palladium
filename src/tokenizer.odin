@@ -4,29 +4,40 @@ import "core:unicode/utf8"
 
 Token_Type :: enum {
 	Invalid = 0,
+	// Literals
 	Integer_Literal,
 	String_Literal,
+	Identifier,
+	// Operators
 	Equals,
 	Plus,
 	Minus,
 	Star,
 	Slash,
-	Open_Paren,
-	Close_Paren,
-	Semicolon,
-	Var,
-	True,
-	False,
 	Double_Pipe,
 	Double_Amp,
-	Exclamation_Point,
 	Double_Equals,
 	Less,
 	Greater,
 	Less_Equals,
 	Greater_Equals,
 	Exclamation_Equals,
-	Identifier,
+	// Other symbols
+	Open_Paren,
+	Close_Paren,
+	Semicolon,
+	Exclamation_Point,
+	Open_Curly,
+	Close_Curly,
+	Open_Bracket,
+	Close_Bracket,
+	Comma,
+	Dot,
+	Colon,
+	// Keywords
+	Var,
+	True,
+	False,
 	Echo,
 	If,
 	Else,
@@ -35,14 +46,8 @@ Token_Type :: enum {
 	Break,
 	For,
 	In,
-	Open_Curly,
-	Close_Curly,
-	Open_Bracket,
-	Close_Bracket,
 	Function,
 	Return,
-	Comma,
-	Colon,
 	EOF,
 }
 
@@ -70,7 +75,7 @@ Token :: struct {
 
 Tokenizer :: struct {
 	source: string,
-	path: string,
+	path:   string,
 	offset: int,
 }
 
@@ -122,6 +127,8 @@ scan_next_token :: proc(tk: ^Tokenizer) -> Token {
 		return scan_simple_token(tk, .Colon, 1)
 	case ',':
 		return scan_simple_token(tk, .Comma, 1)
+	case '.':
+		return scan_simple_token(tk, .Dot, 1)
 	case '!':
 		if tk_next_rune(tk) == '=' {
 			return scan_simple_token(tk, .Exclamation_Equals, 2)

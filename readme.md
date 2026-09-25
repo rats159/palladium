@@ -26,9 +26,15 @@ I don't know much about where this'll go, but here're the plans
 - [x] CLI (`palladium run test.pd`, etc)
 - [x] For loops
 - [x] Better error messages
-- [ ] Syntax Rework
+- [x] Syntax Rework
+- [ ] Slices
 - [ ] Structs
+- [ ] Different integer sizes
+- [ ] Floats
+- [ ] Enums
 - [ ] Imports
+- [ ] Generic types & functions
+- [ ] Native Compilation
 
 ---
 
