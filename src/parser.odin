@@ -94,6 +94,9 @@ Parser_Error_Type :: enum {
 
 Parser_Error :: struct {
 	type:    Parser_Error_Type,
+	offset:  int,
+	source:  string,
+	path:    string,
 	message: string,
 }
 
@@ -175,9 +178,9 @@ Binding_Power :: enum {
 	Call,
 }
 
-parse_file :: proc(source: string, allocator: runtime.Allocator) -> (Node, []Parser_Error) {
+parse_file :: proc(source: string, path: string, allocator: runtime.Allocator) -> (Node, []Parser_Error) {
 	p := Parser {
-		tokenizer = {source = source},
+		tokenizer = {source = source, path = path},
 		allocator = allocator,
 		allow_compound_literal = true,
 	}
@@ -192,8 +195,12 @@ parse_statements_until :: proc(p: ^Parser, until: Token_Type) -> (_node: Node, _
 	statements: xar.Array(Node, 4)
 	xar.array_init(&statements, p.allocator)
 	for !parser_match(p, until) {
-		statement := parse_statement(p) or_return
-		xar.append(&statements, statement)
+		statement, parsed_ok := parse_statement(p)
+		if parsed_ok {
+			xar.append(&statements, statement)
+		} else {
+			parser_recover(p)
+		}
 	}
 
 	node := make_node(p, Block_Node)
@@ -201,6 +208,20 @@ parse_statements_until :: proc(p: ^Parser, until: Token_Type) -> (_node: Node, _
 	node.statements = statements
 
 	return node, true
+}
+
+parser_recover :: proc(p: ^Parser) {
+	for {
+		#partial switch parser_current(p).type {
+		case .EOF:
+			return
+		case .Semicolon:
+			parser_advance(p)
+			return
+		case:
+			parser_advance(p)
+		}
+	}
 }
 
 parse_statement :: proc(p: ^Parser) -> (_node: Node, _ok: bool) {
@@ -269,7 +290,7 @@ parse_type :: proc(p: ^Parser) -> (_node: Node, _ok: bool) {
 		return node, true
 	}
 
-	parser_error(p, .Invalid_Value, fmt.tprintf("Token %s cannot begin a type", token.type))
+	parser_error(p, .Invalid_Value, token.position, fmt.tprintf("Token %s cannot begin a type", token.type))
 	return {}, false
 }
 
@@ -332,7 +353,12 @@ parse_if_statement :: proc(p: ^Parser) -> (_node: Node, _ok: bool) {
 			_ = parser_expect(p, .Open_Curly) or_return
 			else_body = parse_statements_until(p, .Close_Curly) or_return
 		case:
-			parser_error(p, .Failed_Expectation, fmt.tprintf("Token %s does not begin an else block", parser_current(p).type))
+			parser_error(
+				p,
+				.Failed_Expectation,
+				parser_current(p).position,
+				fmt.tprintf("Token %s does not begin an else block", parser_current(p).type),
+			)
 			return {}, false
 		}
 	}
@@ -540,13 +566,7 @@ prefix_precedence :: proc(t: Prefix_Operation) -> Binding_Power {
 	panic("Invalid operator")
 }
 
-parse_expression :: proc(
-	p: ^Parser,
-	min_bp: Binding_Power,
-) -> (
-	_node: Node,
-	_ok: bool,
-) {
+parse_expression :: proc(p: ^Parser, min_bp: Binding_Power) -> (_node: Node, _ok: bool) {
 	lhs := parse_prefix(p, min_bp) or_return
 
 	for {
@@ -592,14 +612,7 @@ parse_prefix :: proc(p: ^Parser, bp: Binding_Power) -> (_node: Node, _ok: bool) 
 	return parse_postfix(p, lhs, bp)
 }
 
-parse_postfix :: proc(
-	p: ^Parser,
-	lhs: Node,
-	bp: Binding_Power,
-) -> (
-	_node: Node,
-	_ok: bool,
-) {
+parse_postfix :: proc(p: ^Parser, lhs: Node, bp: Binding_Power) -> (_node: Node, _ok: bool) {
 	lhs := lhs
 
 	for {
@@ -655,14 +668,14 @@ parse_call :: proc(p: ^Parser, callee: Node) -> (_node: Node, _ok: bool) {
 }
 
 // leaks on error. use an arena or be okay with leaks
-parse_string :: proc(p: ^Parser, value: string) -> (_val: string, _ok: bool) {
-	buf := strings.builder_make(0, len(value), p.allocator)
+parse_string :: proc(p: ^Parser, token: Token) -> (_val: string, _ok: bool) {
+	buf := strings.builder_make(0, len(token.value), p.allocator)
 
-	for i := 0; i < len(value);  /**/{
-		char := utf8.rune_at(value, i)
+	for i := 0; i < len(token.value);  /**/{
+		char := utf8.rune_at(token.value, i)
 		if char == '\\' {
 			i += 1
-			escape_char := utf8.rune_at(value, i)
+			escape_char := utf8.rune_at(token.value, i)
 			switch escape_char {
 			case 'n':
 				strings.write_byte(&buf, '\n')
@@ -680,7 +693,12 @@ parse_string :: proc(p: ^Parser, value: string) -> (_val: string, _ok: bool) {
 				strings.write_byte(&buf, '\\')
 				i += 1
 			case:
-				parser_error(p, .Invalid_Escape, fmt.tprintf("Invalid escape sequence '\\%c'", escape_char))
+				parser_error(
+					p,
+					.Invalid_Escape,
+					token.position + i,
+					fmt.tprintf("Invalid escape sequence '\\%c'", escape_char),
+				)
 				return "", false
 			}
 		} else {
@@ -716,7 +734,7 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _ok: bool) {
 		node.value = false
 		return node, true
 	case .String_Literal:
-		str := parse_string(p, tok.value) or_return
+		str := parse_string(p, tok) or_return
 		node := make_node(p, String_Node)
 		node.value = str
 		return node, true
@@ -736,7 +754,12 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _ok: bool) {
 		_ = parser_expect(p, .Close_Bracket) or_return
 		elem_type := parse_type(p) or_return
 		if !p.allow_compound_literal {
-			parser_error(p, .Not_An_Expression, fmt.tprint("Found a type where an expression was expected"))
+			parser_error(
+				p,
+				.Not_An_Expression,
+				tok.position,
+				fmt.tprint("Found a type where an expression was expected"),
+			)
 			return {}, false
 		}
 		_ = parser_expect(p, .Open_Curly) or_return
@@ -759,9 +782,19 @@ parse_value :: proc(p: ^Parser) -> (_node: Node, _ok: bool) {
 	}
 
 	if tok.type == .EOF {
-		parser_error(p, .Invalid_Value, fmt.tprintf("Unexpected end of file when parsing expression"))
+		parser_error(
+			p,
+			.Invalid_Value,
+			tok.position,
+			fmt.tprintf("Unexpected end of file when parsing expression"),
+		)
 	} else {
-		parser_error(p, .Invalid_Value, fmt.tprintf("Token '%s' has no value", tok.value))
+		parser_error(
+			p,
+			.Invalid_Value,
+			tok.position,
+			fmt.tprintf("Cannot create a value expression from '%s'", tok.value),
+		)
 	}
 
 	return {}, false
@@ -794,7 +827,12 @@ parser_expect :: proc(p: ^Parser, type: Token_Type) -> (Token, bool) {
 		parser_error(
 			p,
 			.Failed_Expectation,
-			fmt.tprintf("Expected %s but recieved %s", type, tk.type),
+			tk.position,
+			fmt.tprintf(
+				"Expected %s but recieved %s",
+				type,
+				token_to_string(tk, context.temp_allocator),
+			),
 		)
 		return tk, false
 	}
@@ -821,10 +859,13 @@ parser_current :: proc(p: ^Parser) -> Token {
 	return p.token
 }
 
-parser_error :: proc(p: ^Parser, type: Parser_Error_Type, message: string) {
+parser_error :: proc(p: ^Parser, type: Parser_Error_Type, offset: int, message: string) {
 	error := Parser_Error {
 		type    = type,
 		message = message,
+		source = p.tokenizer.source,
+		path = p.tokenizer.path,
+		offset = offset
 	}
 
 	append(&p.errors, error)

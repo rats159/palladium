@@ -70,6 +70,7 @@ Token :: struct {
 
 Tokenizer :: struct {
 	source: string,
+	path: string,
 	offset: int,
 }
 

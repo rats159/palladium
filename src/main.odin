@@ -53,7 +53,7 @@ run_program :: proc(filepath: string) {
 		return
 	}
 
-	ast, parser_errors := parse_file(string(file_source), alloc)
+	ast, parser_errors := parse_file(string(file_source), filepath, alloc)
 
 	if len(parser_errors) != 0 {
 		for error in parser_errors {
@@ -94,7 +94,7 @@ disassemble_program :: proc(filepath: string) {
 		return
 	}
 
-	ast, parser_errors := parse_file(string(file_source), alloc)
+	ast, parser_errors := parse_file(string(file_source), filepath, alloc)
 
 	if len(parser_errors) != 0 {
 		for err in parser_errors {
