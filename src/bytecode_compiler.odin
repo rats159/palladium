@@ -55,6 +55,7 @@ Instruction :: enum u8 {
 
 Register :: enum byte {
 	Stack_Pointer = 1,
+	Calculation_Stack_Top,
 	Function_Top,
 	Global_Base,
 }
@@ -201,9 +202,21 @@ expression_to_address_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: Check
 		lvalue_read_to_address_bytecode(compiler, type)
 	case ^Checked_Array_Index:
 		array_index_to_address_bytecode(compiler, type, expr.type)
+	case ^Array_Literal:
+		array_literal_to_address_bytecode(compiler, type, expr.type)
 	case:
 		panic("Bad expression made it through checker as an lvalue")
 	}
+}
+
+array_literal_to_address_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: ^Array_Literal, type: ^Type) {
+	array_literal_to_bytecode(compiler, expr, type)
+	emit_instruction(compiler, .Get_Register)
+	emit_register(compiler, .Calculation_Stack_Top)
+	emit_instruction(compiler, .Push_Bytes)
+	emit_size(compiler, size_of(Size))
+	emit_size(compiler, type_size_of(type))
+	emit_instruction(compiler, .Sub_I64)
 }
 
 array_index_to_address_bytecode :: proc(

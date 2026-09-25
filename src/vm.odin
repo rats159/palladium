@@ -82,6 +82,8 @@ execute_instruction :: proc(vm: ^VM) -> bool {
 			push_uintptr(vm, vm.function_top)
 		case .Global_Base:
 			push_uintptr(vm, uintptr(raw_data(vm.variable_stack)))
+		case .Calculation_Stack_Top:
+			#no_bounds_check {push_uintptr(vm, uintptr(&vm.stack[len(vm.stack)]))}
 		case:
 			panic("Impossible register")
 		}
@@ -94,6 +96,8 @@ execute_instruction :: proc(vm: ^VM) -> bool {
 			vm.function_top = pop_uintptr(vm)
 		case .Global_Base:
 			panic("Global base should never be set ??")
+		case .Calculation_Stack_Top:
+			panic("Calculation stack top should never be set ??")
 		case:
 			panic("Impossible register")
 		}
