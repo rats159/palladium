@@ -629,16 +629,6 @@ check_echo :: proc(checker: ^Checker, node: ^Echo_Node) -> (Checked_Statement, S
 		)
 	}
 
-	if !ECHO_STATEMENT {
-		append(
-			&checker.errors,
-			Type_Error {
-				type = .Internal_Error,
-				message = "Debug-only `echo` statements are not enabled in this build of the compiler.",
-			},
-		)
-	}
-
 	node.value = checked_val
 	return node, {returns_value = false}
 }

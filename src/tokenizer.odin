@@ -63,12 +63,12 @@ keywords := #partial [Token_Type]string {
 }
 
 Token :: struct {
-	type:  Token_Type,
-	value: string,
+	type:     Token_Type,
+	value:    string,
+	position: int,
 }
 
 Tokenizer :: struct {
-	token:  Token,
 	source: string,
 	offset: int,
 }
@@ -81,88 +81,88 @@ tk_next_rune :: proc(tk: ^Tokenizer, distance: int = 1) -> rune {
 	return utf8.rune_at_pos(tk.source[tk.offset:], distance)
 }
 
-tk_scan :: proc(tk: ^Tokenizer) {
+scan_next_token :: proc(tk: ^Tokenizer) -> Token {
 	skip_whitespace(tk)
+
+	if tk.offset >= len(tk.source) {
+		return {type = .EOF, value = "<EOF>", position = tk.offset}
+	}
+
 	switch tk_current_rune(tk) {
-	case utf8.RUNE_ERROR:
-		tk.token = {
-			type  = .EOF,
-			value = "<EOF>",
-		}
-	case 'A' ..= 'Z', 'a' ..= 'z':
-		emit_named(tk)
+	case 'A' ..= 'Z', 'a' ..= 'z', '_':
+		return scan_word_token(tk)
 	case '"':
-		emit_string(tk)
+		return scan_string_token(tk)
 	case '0' ..= '9':
-		emit_number(tk)
+		return scan_number_token(tk)
 	case '+':
-		emit_basic(tk, .Plus, 1)
+		return scan_simple_token(tk, .Plus, 1)
 	case '-':
-		emit_basic(tk, .Minus, 1)
+		return scan_simple_token(tk, .Minus, 1)
 	case '*':
-		emit_basic(tk, .Star, 1)
+		return scan_simple_token(tk, .Star, 1)
 	case '/':
-		emit_basic(tk, .Slash, 1)
+		return scan_simple_token(tk, .Slash, 1)
 	case '(':
-		emit_basic(tk, .Open_Paren, 1)
+		return scan_simple_token(tk, .Open_Paren, 1)
 	case ')':
-		emit_basic(tk, .Close_Paren, 1)
+		return scan_simple_token(tk, .Close_Paren, 1)
 	case '{':
-		emit_basic(tk, .Open_Curly, 1)
+		return scan_simple_token(tk, .Open_Curly, 1)
 	case '}':
-		emit_basic(tk, .Close_Curly, 1)
+		return scan_simple_token(tk, .Close_Curly, 1)
 	case '[':
-		emit_basic(tk, .Open_Bracket, 1)
+		return scan_simple_token(tk, .Open_Bracket, 1)
 	case ']':
-		emit_basic(tk, .Close_Bracket, 1)
+		return scan_simple_token(tk, .Close_Bracket, 1)
 	case ';':
-		emit_basic(tk, .Semicolon, 1)
+		return scan_simple_token(tk, .Semicolon, 1)
 	case ':':
-		emit_basic(tk, .Colon, 1)
+		return scan_simple_token(tk, .Colon, 1)
 	case ',':
-		emit_basic(tk, .Comma, 1)
+		return scan_simple_token(tk, .Comma, 1)
 	case '!':
 		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Exclamation_Equals, 2)
+			return scan_simple_token(tk, .Exclamation_Equals, 2)
 		} else {
-			emit_basic(tk, .Exclamation_Point, 1)
+			return scan_simple_token(tk, .Exclamation_Point, 1)
 		}
 	case '=':
 		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Double_Equals, 2)
+			return scan_simple_token(tk, .Double_Equals, 2)
 		} else {
-			emit_basic(tk, .Equals, 1)
+			return scan_simple_token(tk, .Equals, 1)
 		}
 	case '|':
 		if tk_next_rune(tk) == '|' {
-			emit_basic(tk, .Double_Pipe, 2)
+			return scan_simple_token(tk, .Double_Pipe, 2)
 		} else {
-			emit_invalid_token(tk)
+			return scan_invalid_token(tk)
 		}
 	case '&':
 		if tk_next_rune(tk) == '&' {
-			emit_basic(tk, .Double_Amp, 2)
+			return scan_simple_token(tk, .Double_Amp, 2)
 		} else {
-			emit_invalid_token(tk)
+			return scan_invalid_token(tk)
 		}
 	case '>':
 		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Greater_Equals, 2)
+			return scan_simple_token(tk, .Greater_Equals, 2)
 		} else {
-			emit_basic(tk, .Greater, 1)
+			return scan_simple_token(tk, .Greater, 1)
 		}
 	case '<':
 		if tk_next_rune(tk) == '=' {
-			emit_basic(tk, .Less_Equals, 2)
+			return scan_simple_token(tk, .Less_Equals, 2)
 		} else {
-			emit_basic(tk, .Less, 1)
+			return scan_simple_token(tk, .Less, 1)
 		}
 	case:
-		emit_invalid_token(tk)
+		return scan_invalid_token(tk)
 	}
 }
 
-emit_string :: proc(tk: ^Tokenizer) {
+scan_string_token :: proc(tk: ^Tokenizer) -> Token {
 	tk_advance_rune(tk)
 	start := tk.offset
 
@@ -186,13 +186,10 @@ emit_string :: proc(tk: ^Tokenizer) {
 
 	str := tk.source[start:end]
 
-	tk.token = {
-		type  = .String_Literal,
-		value = str,
-	}
+	return {type = .String_Literal, value = str, position = start}
 }
 
-emit_named :: proc(tk: ^Tokenizer) {
+scan_word_token :: proc(tk: ^Tokenizer) -> Token {
 	start := tk.offset
 
 	outer: for {
@@ -208,29 +205,23 @@ emit_named :: proc(tk: ^Tokenizer) {
 
 	for kwd, type in keywords {
 		if kwd == name {
-			tk.token = {
-				type  = type,
-				value = name,
-			}
-			return
+			return {type = type, value = name, position = start}
 		}
 	}
 
-	tk.token = {
-		type  = .Identifier,
-		value = name,
-	}
+	return {type = .Identifier, value = name, position = start}
 }
 
-emit_basic :: proc(tk: ^Tokenizer, type: Token_Type, byte_length: int) {
-	tk.token = {
-		type  = type,
+scan_simple_token :: proc(tk: ^Tokenizer, type: Token_Type, byte_length: int) -> Token {
+	defer tk.offset += byte_length
+	return {
+		type = type,
 		value = tk.source[tk.offset:tk.offset + byte_length],
+		position = tk.offset,
 	}
-	tk.offset += byte_length
 }
 
-emit_number :: proc(tk: ^Tokenizer) {
+scan_number_token :: proc(tk: ^Tokenizer) -> Token {
 	start := tk.offset
 	outer: for {
 		switch tk_current_rune(tk) {
@@ -243,21 +234,15 @@ emit_number :: proc(tk: ^Tokenizer) {
 
 	str := tk.source[start:tk.offset]
 
-	tk.token = {
-		type  = .Integer_Literal,
-		value = str,
-	}
+	return {type = .Integer_Literal, value = str, position = start}
 }
 
-emit_invalid_token :: proc(tk: ^Tokenizer) {
+scan_invalid_token :: proc(tk: ^Tokenizer) -> Token {
 	start := tk.offset
 	tk_advance_rune(tk)
 	str := tk.source[start:tk.offset]
 
-	tk.token = {
-		type  = .Invalid,
-		value = str,
-	}
+	return {type = .Invalid, value = str, position = start}
 }
 
 tk_advance_rune :: proc(tk: ^Tokenizer) {
@@ -290,4 +275,3 @@ skip_comment :: proc(tk: ^Tokenizer) {
 		}
 	}
 }
-

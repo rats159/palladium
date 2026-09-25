@@ -10,6 +10,7 @@ import "core:unicode/utf8"
 
 Parser :: struct {
 	tokenizer:              Tokenizer,
+	token:                  Token,
 	allocator:              runtime.Allocator,
 	allow_compound_literal: bool,
 }
@@ -186,7 +187,7 @@ parse_file :: proc(
 		allow_compound_literal = true,
 	}
 
-	tk_scan(&p.tokenizer)
+	parser_advance(&p)
 
 	return parse_statement_list(&p, .EOF)
 }
@@ -258,14 +259,16 @@ parse_statement :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) 
 }
 
 parse_type :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
-	token := parser_advance(p)
+	token := parser_current(p)
 	if token.type == .Identifier {
+		_ = parser_expect(p, .Identifier) or_return
 		node := make_node(p, Variable_Read_Node)
 		node.name = token.value
 		return node, nil
 	}
 
 	if token.type == .Open_Bracket {
+		_ = parser_expect(p, .Open_Bracket) or_return
 		// FUTURE: slices
 		length := parse_expression(p, .None) or_return
 		_ = parser_expect(p, .Close_Bracket) or_return
@@ -707,7 +710,8 @@ parse_integer :: proc(value: string) -> i64 {
 }
 
 parse_value :: proc(p: ^Parser) -> (_node: Node, _err: Maybe(Parser_Error)) {
-	tok := parser_advance(p)
+	tok := parser_current(p)
+	parser_advance(p)
 	#partial switch tok.type {
 	case .Integer_Literal:
 		num := parse_integer(tok.value)
@@ -793,14 +797,14 @@ parse_compound :: proc(p: ^Parser) -> (_e: Node, _r: Maybe(Parser_Error)) {
 
 @(require_results)
 parser_expect :: proc(p: ^Parser, type: Token_Type) -> (tok: Token, err: Maybe(Parser_Error)) {
-	tk := parser_advance(p)
+	tk := parser_current(p)
 	if tk.type != type {
 		return tk, Parser_Error {
 			type = .Failed_Expectation,
 			message = fmt.tprintf("Expected %s but recieved %s", type, tk.type),
 		}
 	}
-
+	parser_advance(p)
 	return tk, nil
 }
 
@@ -814,13 +818,11 @@ parser_match :: proc(p: ^Parser, type: Token_Type) -> bool {
 	return false
 }
 
-parser_advance :: proc(p: ^Parser) -> Token {
-	tok := p.tokenizer.token
-	tk_scan(&p.tokenizer)
-	return tok
+parser_advance :: proc(p: ^Parser) {
+	tok := scan_next_token(&p.tokenizer)
+	p.token = tok
 }
 
 parser_current :: proc(p: ^Parser) -> Token {
-	return p.tokenizer.token
+	return p.token
 }
-

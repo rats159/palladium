@@ -152,7 +152,7 @@ statement_to_bytecode :: proc(compiler: ^Bytecode_Compiler, statement: Checked_S
 	case ^Checked_Write:
 		write_to_bytecode(compiler, type)
 	case ^Checked_Expression_Statement:
-		checked_expression_statement_to_bytecode(compiler, type)
+		expression_statement_to_bytecode(compiler, type)
 	case ^Checked_While:
 		while_to_bytecode(compiler, type)
 	case ^Checked_For:
@@ -177,7 +177,6 @@ statement_to_bytecode :: proc(compiler: ^Bytecode_Compiler, statement: Checked_S
 }
 
 echo_to_bytecode :: proc(compiler: ^Bytecode_Compiler, expr: ^Checked_Echo) {
-	assert(ECHO_STATEMENT, "Bad echo in AST")
 	assert(expr.flavor != .Invalid)
 
 	expression_to_bytecode(compiler, expr.value)
@@ -254,7 +253,7 @@ write_to_bytecode :: proc(compiler: ^Bytecode_Compiler, stmt: ^Checked_Write) {
 	emit_size(compiler, type_size_of(stmt.target.type))
 }
 
-checked_expression_statement_to_bytecode :: proc(
+expression_statement_to_bytecode :: proc(
 	compiler: ^Bytecode_Compiler,
 	stmt: ^Checked_Expression_Statement,
 ) {

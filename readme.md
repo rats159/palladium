@@ -25,6 +25,7 @@ I don't know much about where this'll go, but here're the plans
 - [x] Bytecode
 - [x] CLI (`palladium run test.pd`, etc)
 - [x] For loops
+- [ ] Better error messages
 - [ ] Syntax Rework
 - [ ] Structs
 - [ ] Imports
