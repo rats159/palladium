@@ -53,10 +53,12 @@ run_program :: proc(filepath: string) {
 		return
 	}
 
-	ast, parser_error := parse_file(string(file_source), alloc)
+	ast, parser_errors := parse_file(string(file_source), alloc)
 
-	if parser_error != nil {
-		print_parser_error(parser_error.?)
+	if len(parser_errors) != 0 {
+		for error in parser_errors {
+			print_parser_error(error)
+		}
 		return
 	}
 
@@ -92,10 +94,12 @@ disassemble_program :: proc(filepath: string) {
 		return
 	}
 
-	ast, parser_error := parse_file(string(file_source), alloc)
+	ast, parser_errors := parse_file(string(file_source), alloc)
 
-	if parser_error != nil {
-		print_parser_error(parser_error.?)
+	if len(parser_errors) != 0 {
+		for err in parser_errors {
+			print_parser_error(err)
+		}
 		return
 	}
 
